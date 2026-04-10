@@ -29,6 +29,12 @@ tasks:
     description: Calcule l'éligibilité à la prime sportive (taux = prime_rate)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -42,6 +48,12 @@ tasks:
     description: "[TEST] gold.prime_eligibility : 68 lignes, cohérence montants"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -68,6 +80,12 @@ tasks:
     description: Calcule l'éligibilité aux jours bien-être (seuil = wellbeing_threshold activités)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -83,6 +101,12 @@ tasks:
     description: "[TEST] gold.wellbeing_eligibility : 161 lignes, days_granted dans {0, 5}"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -108,6 +132,12 @@ tasks:
     description: Extrait les distances incohérentes et les insère dans gold.distance_anomalies
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -121,6 +151,12 @@ tasks:
     description: "[TEST] gold.distance_anomalies : anomaly_reason toujours renseigné"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -142,6 +178,12 @@ tasks:
     description: Agrège les coûts prime + bien-être par BU dans gold.cost_summary
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -155,6 +197,12 @@ tasks:
     description: "[TEST] gold.cost_summary : 6 lignes, ligne TOTAL.nb_total_salaries = 161"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -177,6 +225,12 @@ tasks:
     description: Classe les 161 salariés par nombre d'activités Strava dans gold.activity_leaderboard
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -190,6 +244,12 @@ tasks:
     description: "[TEST] gold.activity_leaderboard : 161 lignes, MIN(classement) = 1"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")

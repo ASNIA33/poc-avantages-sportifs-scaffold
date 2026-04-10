@@ -34,6 +34,12 @@ tasks:
     description: Charge Donnees_RH.xlsx vers bronze.rh_raw (161 lignes attendues)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -47,6 +53,12 @@ tasks:
     description: "[TEST] bronze.rh_raw doit contenir 161 lignes"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -65,6 +77,12 @@ tasks:
     description: Charge Donnees_Sportive.xlsx vers bronze.sports_raw (161 lignes attendues)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -78,6 +96,12 @@ tasks:
     description: "[TEST] bronze.sports_raw doit contenir 161 lignes"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -100,6 +124,12 @@ tasks:
     description: Calcule les distances domicile-bureau (Google Maps API ou simulation haversine)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -115,6 +145,12 @@ tasks:
     description: "[TEST] bronze.distances_raw doit contenir 68 lignes (sportifs)"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -137,6 +173,12 @@ tasks:
     description: Génère les activités sportives simulées (12 mois) pour les 95 sportifs
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -150,6 +192,12 @@ tasks:
     description: "[TEST] bronze.strava_raw doit contenir > 1 000 lignes"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
