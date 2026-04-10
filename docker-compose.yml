@@ -41,6 +41,10 @@ services:
             username: kestra
             password: kestra_pwd
         kestra:
+          storage:
+            type: local
+            local:
+              base-path: /app/storage
           repository:
             type: postgres
           queue:
