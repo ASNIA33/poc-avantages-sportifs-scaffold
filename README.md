@@ -142,9 +142,20 @@ python -m src.transformation.clean_sports
 python -m src.transformation.validate_distances
 python -m src.transformation.clean_strava
 
+# --- Couche Gold (Calculs métier) ---
+
+# Tous les calculs Silver → Gold en une commande
+python -c "from src.business import run_all_business; run_all_business()"
+
+# Ou module par module :
+python -m src.business.compute_prime
+python -m src.business.compute_wellbeing
+python -m src.business.detect_anomalies
+python -m src.business.build_summary
+
 # --- Tests ---
 
-# Lancer tous les tests (ingestion + transformation)
+# Lancer tous les tests (ingestion + transformation + business)
 python -m pytest src/tests/ -v
 ```
 
@@ -206,12 +217,11 @@ Checks implémentés :
 python -m pytest src/tests/ -v
 ```
 
-Couverture actuelle :
-- **Ingestion Bronze** : nombre de lignes (161), colonnes snake_case, absence de nulls sur `id_salarie`, présence de `_ingested_at`
-- Calcul de la prime avec différents taux
-- Éligibilité jours bien-être (seuil 14/15/16 activités)
-- Formatage des messages Slack
-- Détection des anomalies de distance
+Couverture actuelle — **58 tests** répartis sur 3 fichiers :
+
+- **Ingestion Bronze** (`test_ingestion.py`, 20 tests) : nombre de lignes (161), colonnes snake_case, absence de nulls sur `id_salarie`, présence de `_ingested_at`, données Strava et distances
+- **Transformation Silver** (`test_transformation.py`, 16 tests) : employees, sports_activities, distances (anomalies), strava_activities
+- **Calculs métier Gold** (`test_business.py`, 22 tests) : prime (taux 5% et personnalisé), jours bien-être (seuils 14 et 15), anomalies, résumé par BU, classement activités
 
 ---
 

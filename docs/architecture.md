@@ -294,6 +294,94 @@ Fixture `scope="module"` : Bronze chargé une fois, une distance anomalique inje
 - `silver.distances` : validation vs seuils config (`WALK_MAX_KM=15`, `BIKE_MAX_KM=25`), colonnes `is_valid` et `anomaly_reason`
 - `silver.strava_activities` : `distance_km = distance_m/1000`, `duree_minutes = temps_ecoule_s/60`
 
+## Couche Gold — Calculs métier
+
+### Modules `src/business/`
+
+| Module | Fonction(s) | Silver → Gold |
+|---|---|---|
+| `compute_prime.py` | `compute_prime_eligibility()` | `employees` + `distances` → `prime_eligibility` |
+| `compute_wellbeing.py` | `compute_wellbeing_eligibility()` | `employees` + `strava_activities` → `wellbeing_eligibility` |
+| `detect_anomalies.py` | `detect_distance_anomalies()` | `distances` + `employees` → `distance_anomalies` |
+| `build_summary.py` | `build_cost_summary()` + `build_activity_leaderboard()` | tables Gold → `cost_summary` + `activity_leaderboard` |
+| `__init__.py` | `run_all_business()` | Orchestre les 5 fonctions dans l'ordre |
+
+**Tables Gold produites :**
+
+| Table | Périmètre | Colonnes clés |
+|---|---|---|
+| `gold.prime_eligibility` | 68 sportifs | `is_eligible`, `prime_montant`, `reason_ineligible` |
+| `gold.wellbeing_eligibility` | 161 salariés | `activity_count`, `is_eligible`, `days_granted` |
+| `gold.distance_anomalies` | Anomalies only | `distance_km`, `max_distance_km`, `anomaly_reason` |
+| `gold.cost_summary` | 5 BU + TOTAL | `cout_prime_total`, `nb_wellbeing_eligible` |
+| `gold.activity_leaderboard` | 161 salariés | `activity_count`, `classement` |
+
+**Règles métier implémentées :**
+
+- **Prime sportive** : `prime_montant = salaire_brut × PRIME_RATE` (0 si non éligible) — taux paramétrable
+- **Jours bien-être** : `days_granted = 5` si `activity_count >= WELLBEING_THRESHOLD` — seuil paramétrable
+- **Anomalies** : distance > seuil mode → logue en WARNING + insère dans `gold.distance_anomalies`
+- **Résumé coûts** : agrégation par BU avec ligne TOTAL via `UNION ALL` dans une sous-requête
+- **Classement** : `RANK() OVER (ORDER BY activity_count DESC)` — ex-aequo gérés
+
+**Paramètres dynamiques (via `src/utils/config.py`) :**
+
+| Paramètre | Défaut | Description |
+|---|---|---|
+| `PRIME_RATE` | 0.05 | Taux de la prime (5%) |
+| `WELLBEING_THRESHOLD` | 15 | Seuil minimum d'activités |
+
+### Tests implémentés — Calculs métier Gold (`src/tests/test_business.py`)
+
+Fixture `scope="module"` : Bronze + anomalie injectée (walking 20 km) + Silver complet + Gold complet.
+
+**gold.prime_eligibility**
+
+| Test | Vérification |
+|---|---|
+| `test_prime_row_count` | 68 lignes (sportifs uniquement) |
+| `test_prime_has_ineligible` | ≥ 1 non éligible (anomalie injectée) |
+| `test_prime_eligible_have_nonzero_montant` | Éligibles ont prime_montant > 0 |
+| `test_prime_ineligible_have_zero_montant` | Non éligibles ont prime_montant = 0 |
+| `test_prime_calcul_taux_defaut` | prime_montant = salaire × 0.05 (tolérance 0.01) |
+| `test_prime_ineligible_have_reason` | reason_ineligible non nul si non éligible |
+| `test_prime_custom_rate` | Taux 10% → montants 2× supérieurs à 5% |
+
+**gold.wellbeing_eligibility**
+
+| Test | Vérification |
+|---|---|
+| `test_wellbeing_row_count` | 161 lignes (tous les salariés) |
+| `test_wellbeing_has_eligible` | ≥ 1 éligible |
+| `test_wellbeing_days_granted_binary` | days_granted ∈ {0, 5} uniquement |
+| `test_wellbeing_consistency_eligible_days` | Cohérence is_eligible ↔ days_granted |
+| `test_wellbeing_seuil_14_non_eligible` | Seuil 14 → éligibles ≥ seuil 15 |
+
+**gold.distance_anomalies**
+
+| Test | Vérification |
+|---|---|
+| `test_anomalies_has_at_least_one` | ≥ 1 anomalie détectée |
+| `test_anomalies_have_reason` | anomaly_reason non nul |
+| `test_anomalies_distance_exceeds_max` | distance_km > max_distance_km |
+
+**gold.cost_summary**
+
+| Test | Vérification |
+|---|---|
+| `test_cost_summary_row_count` | 6 lignes (5 BU + TOTAL) |
+| `test_cost_summary_has_total_row` | Ligne 'TOTAL' présente |
+| `test_cost_summary_total_coherent` | TOTAL.nb_total_salaries = 161 |
+| `test_cost_summary_bu_names` | 5 BU : Finance, Marketing, R&D, Support, Ventes |
+
+**gold.activity_leaderboard**
+
+| Test | Vérification |
+|---|---|
+| `test_leaderboard_row_count` | 161 lignes |
+| `test_leaderboard_classement_starts_at_one` | MIN(classement) = 1 |
+| `test_leaderboard_non_sportifs_have_zero_activities` | Cohérence classement / activités |
+
 ## Docker Compose — Services, ports et volumes
 
 ```mermaid
