@@ -198,26 +198,12 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # Options globales communes à toutes les sous-commandes
+    # Option globale --db-path (avant ou après la sous-commande)
     parser.add_argument(
         "--db-path",
         default=DEFAULT_DB_PATH,
         metavar="CHEMIN",
         help=f"Chemin vers le fichier DuckDB (défaut : {DEFAULT_DB_PATH})",
-    )
-    parser.add_argument(
-        "--prime-rate",
-        type=float,
-        default=None,
-        metavar="TAUX",
-        help="Override le taux de prime (ex : 0.08 pour 8%%, défaut : 0.05)",
-    )
-    parser.add_argument(
-        "--threshold",
-        type=int,
-        default=None,
-        metavar="SEUIL",
-        help="Override le seuil d'activités pour les jours bien-être (défaut : 15)",
     )
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMANDE")
@@ -233,6 +219,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--notify",
         action="store_true",
         help="Envoie les notifications Slack après le pipeline Gold",
+    )
+    # Paramètres métier sur la sous-commande run (placés après "run" sur la ligne de commande)
+    run_parser.add_argument(
+        "--prime-rate",
+        type=float,
+        default=None,
+        metavar="TAUX",
+        help="Override le taux de prime (ex : 0.08 pour 8%%, défaut : 0.05)",
+    )
+    run_parser.add_argument(
+        "--threshold",
+        type=int,
+        default=None,
+        metavar="SEUIL",
+        help="Override le seuil d'activités pour les jours bien-être (défaut : 15)",
     )
     run_parser.set_defaults(func=cmd_run)
 
