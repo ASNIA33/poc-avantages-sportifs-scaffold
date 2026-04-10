@@ -382,30 +382,70 @@ Fixture `scope="module"` : Bronze + anomalie injectée (walking 20 km) + Silver 
 | `test_leaderboard_classement_starts_at_one` | MIN(classement) = 1 |
 | `test_leaderboard_non_sportifs_have_zero_activities` | Cohérence classement / activités |
 
-## Docker Compose — Services, ports et volumes
+## Docker — Images et déploiement
+
+### Dockerfiles
+
+| Fichier | Base | Rôle |
+|---|---|---|
+| `docker/Dockerfile.pipeline` | `python:3.11-slim` | Image pipeline ETL (Bronze→Silver→Gold) |
+| `docker/metabase/Dockerfile.metabase` | `metabase/metabase:latest` + `debian:12-slim` | Metabase + driver DuckDB v1.5.1.0 |
+
+**`docker/Dockerfile.pipeline`** — Image légère pour exécuter le pipeline :
+- Installe les dépendances `requirements.txt` (sans cache pip)
+- Copie `src/` et `main.py`
+- `ENTRYPOINT ["python", "main.py"]`, `CMD ["run"]`
+- Variables : `DUCKDB_PATH`, `PYTHONUNBUFFERED=1`
+
+**`docker/metabase/Dockerfile.metabase`** — Build multi-étapes :
+1. Stage `downloader` (debian:12-slim) : télécharge le JAR DuckDB driver v1.5.1.0 via `curl`
+2. Stage final (metabase:latest) : copie le JAR dans `/plugins/`, `MB_PLUGINS_DIR=/plugins`
+
+### Docker Compose — Services, ports et volumes
 
 ```mermaid
 graph TD
     subgraph Compose["docker-compose.yml"]
         subgraph Services["Services"]
-            PG["postgres\nImage: postgres:18\nPort: 5433→5432\nRôle: backend Kestra"]
-            KE["kestra\nImage: kestra/kestra:latest\nPort: 8082→8080\nPort: 8083→8081\nDépend de: postgres"]
-            MB["metabase\nImage: metabase/metabase:latest\nPort: 3000→3000\nDépend de: kestra"]
+            PG["postgres-sports\nImage: postgres:18\nPort: 5433→5432\nRôle: backend Kestra"]
+            KE["kestra-sports\nImage: kestra/kestra:latest\nPort: 8082→8080\nPort: 8083→8081\nDépend de: postgres"]
+            MB["metabase-sports\nBuild: Dockerfile.metabase\nPort: 3000→3000\nDriver DuckDB inclus"]
+            PP["pipeline-sports\nBuild: Dockerfile.pipeline\nProfil: run\none-shot ETL"]
         end
 
-        subgraph Volumes["Volumes partagés"]
-            VDB["duckdb-data\nfichier sports_poc.duckdb\npartagé Kestra ↔ Metabase"]
-            VPG["postgres-data\ndonnées PostgreSQL Kestra"]
-            VKE["kestra-data\nflows + plugins Kestra"]
+        subgraph Volumes["Volumes"]
+            VDB["./data\nfichier sports_poc.duckdb\nKestra + Metabase + Pipeline"]
+            VPG["postgres_sports_data\nPostgreSQL Kestra"]
+            VKE["kestra_sports_data\nflows + storage Kestra"]
+            VIN["./input\nfichiers Excel source"]
         end
     end
 
     PG -- "données persistantes" --> VPG
     KE -- "données persistantes" --> VKE
-    KE -- "accès DuckDB" --> VDB
-    MB -- "accès DuckDB" --> VDB
+    KE & MB & PP -- "DuckDB partagé" --> VDB
+    PP -- "fichiers Excel" --> VIN
     PG -.->|"backend metadata"| KE
-    KE -.->|"source DuckDB"| MB
+    KE -.->|"depends_on"| MB
+    KE -.->|"depends_on"| PP
+```
+
+**Profil Docker `run`** : le service `pipeline-sports` ne démarre que si le profil est activé :
+```bash
+docker-compose --profile run up pipeline-sports
+```
+
+### Scripts de démarrage
+
+| Script | Rôle |
+|---|---|
+| `scripts/start.sh` | Démarre l'infra, attend Metabase, lance le pipeline, affiche les URLs |
+| `scripts/demo.sh` | Injecte une activité fictive, recalcule Gold, envoie la notification Slack |
+
+```bash
+chmod +x scripts/start.sh scripts/demo.sh
+./scripts/start.sh    # Démarrage complet
+./scripts/demo.sh     # Démo live
 ```
 
 ## Couche Notifications — Slack

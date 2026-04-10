@@ -196,7 +196,13 @@ poc-avantages-sportifs/
 │   ├── tests/                # pytest + SODA checks
 │   └── utils/                # Connexion DB, logging
 ├── kestra/flows/             # Flows d'orchestration YAML
-├── docker/                   # Dockerfiles, plugins Metabase
+├── docker/
+│   ├── Dockerfile.pipeline           # Image Python pipeline ETL
+│   └── metabase/
+│       └── Dockerfile.metabase       # Metabase + driver DuckDB v1.5.1.0
+├── scripts/
+│   ├── start.sh              # Démarrage infra + pipeline complet
+│   └── demo.sh               # Démo live (injection activité + notification)
 ├── docker-compose.yml        # Infrastructure complète
 └── docs/                     # Documentation technique
 ```
