@@ -235,6 +235,65 @@ Deux fonctions principales, toutes deux basées sur `db_session` (gestionnaire d
 Chaque test utilise une DB temporaire (`/tmp/test_ingestion.duckdb`) nettoyée avant et après exécution.
 Le mode simulation haversine est utilisé en test (pas d'appel API réelle).
 
+### Tests implémentés — Transformation Silver (`src/tests/test_transformation.py`)
+
+Fixture `scope="module"` : Bronze chargé une fois, une distance anomalique injectée (walking 20 km > seuil 15 km), puis toutes les transformations Silver exécutées.
+
+**silver.employees**
+
+| Test | Vérification |
+|---|---|
+| `test_employees_row_count` | 161 lignes |
+| `test_employees_is_sportif` | 68 salariés avec `is_sportif_deplacement = TRUE` |
+| `test_employees_no_null_critical` | `id_salarie`, `nom`, `prenom`, `salaire_brut` non nuls |
+| `test_employees_salary_range` | Salaires entre 20 000 et 100 000 € |
+| `test_employees_has_transformed_at` | `_transformed_at` présente et non nulle |
+
+**silver.sports_activities**
+
+| Test | Vérification |
+|---|---|
+| `test_sports_row_count` | 161 lignes |
+| `test_sports_no_runing` | Aucune valeur `'Runing'` (corrigée en `'Running'`) |
+| `test_sports_has_sport_flag` | 95 salariés avec `has_sport = TRUE` |
+
+**silver.distances**
+
+| Test | Vérification |
+|---|---|
+| `test_distances_row_count` | 68 lignes |
+| `test_distances_anomaly_detection` | ≥ 1 anomalie (`is_valid = FALSE`) |
+| `test_distances_valid_have_no_reason` | `anomaly_reason` NULL quand `is_valid = TRUE` |
+| `test_distances_invalid_have_reason` | `anomaly_reason` non NULL quand `is_valid = FALSE` |
+
+**silver.strava_activities**
+
+| Test | Vérification |
+|---|---|
+| `test_strava_row_count` | Même nombre que `bronze.strava_raw` |
+| `test_strava_distance_km` | `distance_km = distance_m / 1000` (tolérance 0.001) |
+| `test_strava_duree_minutes` | `duree_minutes = temps_ecoule_s / 60` (tolérance 0.01) |
+| `test_strava_no_null_required` | `id_salarie`, `date_debut`, `sport_type` non nuls |
+
+## Couche Silver — Transformation
+
+### Modules `src/transformation/`
+
+| Module | Fonction | Bronze → Silver |
+|---|---|---|
+| `clean_rh.py` | `clean_rh_to_silver()` | `rh_raw` → `employees` |
+| `clean_sports.py` | `clean_sports_to_silver()` | `sports_raw` → `sports_activities` |
+| `validate_distances.py` | `validate_distances_to_silver()` | `distances_raw` + `employees` → `distances` |
+| `clean_strava.py` | `clean_strava_to_silver()` | `strava_raw` → `strava_activities` |
+| `__init__.py` | `run_all_transformations()` | Orchestre les 4 modules dans l'ordre |
+
+**Transformations clés :**
+
+- `silver.employees` : dates castées en DATE, salaires en INTEGER, flag `is_sportif_deplacement`, trim des champs texte
+- `silver.sports_activities` : correction "Runing" → "Running", flag `has_sport`
+- `silver.distances` : validation vs seuils config (`WALK_MAX_KM=15`, `BIKE_MAX_KM=25`), colonnes `is_valid` et `anomaly_reason`
+- `silver.strava_activities` : `distance_km = distance_m/1000`, `duree_minutes = temps_ecoule_s/60`
+
 ## Docker Compose — Services, ports et volumes
 
 ```mermaid

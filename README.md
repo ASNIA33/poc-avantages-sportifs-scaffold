@@ -120,6 +120,8 @@ Sans clé API, le pipeline utilise automatiquement le mode simulation haversine.
 ### Lancer les scripts manuellement
 
 ```bash
+# --- Couche Bronze (Ingestion) ---
+
 # Ingestion Excel → Bronze (RH + Sportif)
 python -m src.ingestion.load_excel
 
@@ -129,7 +131,20 @@ python -m src.ingestion.fetch_distances
 # Génération données Strava simulées → Bronze
 python -m src.ingestion.generate_strava
 
-# Lancer tous les tests
+# --- Couche Silver (Transformation) ---
+
+# Toutes les transformations Bronze → Silver en une commande
+python -c "from src.transformation import run_all_transformations; run_all_transformations()"
+
+# Ou module par module :
+python -m src.transformation.clean_rh
+python -m src.transformation.clean_sports
+python -m src.transformation.validate_distances
+python -m src.transformation.clean_strava
+
+# --- Tests ---
+
+# Lancer tous les tests (ingestion + transformation)
 python -m pytest src/tests/ -v
 ```
 
