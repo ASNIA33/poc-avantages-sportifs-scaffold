@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Bash(git status)",
+      "Bash(git branch*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(python*)",
+      "Bash(pytest*)",
+      "Bash(pip*)",
+      "Bash(docker-compose*)",
+      "Bash(cat*)",
+      "Bash(ls*)",
+      "Bash(find*)",
+      "Bash(mkdir*)",
+      "Bash(touch*)",
+      "Bash(cp*)"
+    ],
+    "deny": [
+      "Bash(git push*)",
+      "Bash(git merge*)",
+      "Bash(git checkout main)",
+      "Bash(git switch main)",
+      "Bash(rm -rf*)"
+    ]
+  }
+}

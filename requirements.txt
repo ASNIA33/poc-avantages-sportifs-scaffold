@@ -1,0 +1,18 @@
+# Core
+duckdb>=1.1.0
+pandas>=2.1.0
+openpyxl>=3.1.0
+
+# API
+requests>=2.31.0
+googlemaps>=4.10.0
+
+# Tests
+pytest>=8.0.0
+soda-core-duckdb>=3.3.0
+
+# Notifications
+slack-sdk>=3.27.0
+
+# Utils
+python-dotenv>=1.0.0

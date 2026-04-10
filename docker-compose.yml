@@ -1,0 +1,79 @@
+# ============================================================
+# Docker Compose — POC Avantages Sportifs
+# Kestra (8082/8083) + Metabase (3000) + PostgreSQL (5433)
+# ============================================================
+
+services:
+
+  # --- PostgreSQL : backend Kestra ---
+  postgres-sports:
+    image: postgres:18
+    container_name: postgres-sports
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: kestra_sports
+      POSTGRES_USER: kestra
+      POSTGRES_PASSWORD: kestra_pwd
+    volumes:
+      - postgres_sports_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kestra -d kestra_sports"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Kestra : orchestration + monitoring ---
+  kestra-sports:
+    image: kestra/kestra:latest
+    container_name: kestra-sports
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+      - "8083:8081"
+    environment:
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres-sports:5432/kestra_sports
+            driverClassName: org.postgresql.Driver
+            username: kestra
+            password: kestra_pwd
+        kestra:
+          repository:
+            type: postgres
+          queue:
+            type: postgres
+    volumes:
+      - kestra_sports_data:/app/storage
+      - ./kestra/flows:/app/flows
+      - ./data:/app/data
+      - ./input:/app/input
+      - ./src:/app/src
+    depends_on:
+      postgres-sports:
+        condition: service_healthy
+    command: server standalone
+
+  # --- Metabase : dashboards ---
+  metabase-sports:
+    image: metabase/metabase:latest
+    container_name: metabase-sports
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      MB_DB_TYPE: h2
+      MB_DB_FILE: /metabase-data/metabase.db
+    volumes:
+      - metabase_sports_data:/metabase-data
+      - ./data:/data
+      - ./docker/metabase/plugins:/plugins
+    depends_on:
+      - kestra-sports
+
+volumes:
+  postgres_sports_data:
+  kestra_sports_data:
+  metabase_sports_data:

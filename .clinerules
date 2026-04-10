@@ -1,0 +1,132 @@
+# ============================================================
+# CLAUDE CODE — RÈGLES PROJET : POC Avantages Sportifs
+# Sport Data Solution
+# ============================================================
+
+## IDENTITÉ DU PROJET
+- Projet : POC Avantages Sportifs — Sport Data Solution
+- Stack  : Python 3.11+ · DuckDB · Kestra · Metabase · Docker
+- Rôle   : Data Engineer, pipeline end-to-end
+
+## GIT WORKFLOW — RÈGLES ABSOLUES
+- Branche de travail : `develop` UNIQUEMENT
+- Ne JAMAIS commiter sur `main` directement
+- `main` = production. Seul un merge depuis `develop` est autorisé
+- `main` est mergé UNIQUEMENT par le développeur, JAMAIS par Claude Code
+- Avant chaque commit, vérifier la branche active : `git branch --show-current`
+- Si la branche est `main` → REFUSER le commit et alerter le développeur
+
+## FORMAT DE COMMIT
+- Convention : Conventional Commits
+- Format    : `type(scope): description concise`
+- Types     : feat, fix, refactor, test, docs, chore, ci
+- Exemples  :
+  - `feat(ingestion): ajout du chargement du fichier Excel RH`
+  - `test(quality): ajout des checks SODA pour la couche Silver`
+  - `docs(readme): mise à jour de la section architecture`
+- Langue    : Français pour les commits
+- Pas de Co-Authored-By
+- Commits ATOMIQUES : un commit = une responsabilité unique
+
+## ARCHITECTURE DU CODE
+```
+poc-avantages-sportifs/
+├── .claude/                  # Config Claude Code
+│   └── settings.json
+├── .clinerules               # Ce fichier
+├── CLAUDE.md                 # Instructions Claude Code
+├── README.md                 # Documentation principale
+├── docker-compose.yml        # Kestra (8082/8083) + Metabase (3000)
+├── input/                    # Données sources (Excel)
+│   ├── Donnees_RH.xlsx
+│   └── Donnees_Sportive.xlsx
+├── src/
+│   ├── __init__.py
+│   ├── ingestion/            # Bronze : chargement brut
+│   │   ├── __init__.py
+│   │   ├── load_excel.py
+│   │   ├── fetch_distances.py
+│   │   └── generate_strava.py
+│   ├── transformation/       # Silver : nettoyage + qualité
+│   │   ├── __init__.py
+│   │   ├── clean_rh.py
+│   │   ├── clean_sports.py
+│   │   └── validate_distances.py
+│   ├── business/             # Gold : KPI + éligibilité
+│   │   ├── __init__.py
+│   │   ├── compute_prime.py
+│   │   ├── compute_wellbeing.py
+│   │   └── detect_anomalies.py
+│   ├── notifications/        # Slack
+│   │   ├── __init__.py
+│   │   └── slack_messenger.py
+│   ├── tests/                # pytest + SODA
+│   │   ├── __init__.py
+│   │   ├── test_ingestion.py
+│   │   ├── test_transformation.py
+│   │   ├── test_business.py
+│   │   ├── test_notifications.py
+│   │   └── soda/
+│   │       └── checks.yml
+│   └── utils/
+│       ├── __init__.py
+│       ├── db.py             # Connexion DuckDB
+│       └── logger.py         # Config logging
+├── kestra/
+│   └── flows/                # Flows YAML Kestra
+│       ├── 01_ingestion.yml
+│       ├── 02_transformation.yml
+│       ├── 03_business.yml
+│       ├── 04_notifications.yml
+│       └── 05_full_pipeline.yml
+├── docker/
+│   ├── Dockerfile.pipeline   # Image Python pour les scripts
+│   └── metabase/
+│       └── plugins/          # Driver DuckDB pour Metabase
+├── docs/
+│   └── architecture.md       # Doc technique détaillée
+├── requirements.txt
+├── pytest.ini
+└── .gitignore
+```
+
+## ARCHITECTURE DONNÉES — MEDALLION (DuckDB)
+- Schéma `bronze` : données brutes importées sans transformation
+- Schéma `silver` : données nettoyées, typées, testées par SODA
+- Schéma `gold`   : KPI métier, éligibilités, coûts, anomalies
+- Fichier DuckDB  : `data/sports_poc.duckdb` (volume Docker partagé)
+
+## RÈGLES MÉTIER
+- Prime sportive : 5% du salaire brut annuel
+  - Éligibilité : moyen de déplacement = "Marche/running" OU "Vélo/Trottinette/Autres"
+  - Validation distance : marche/running ≤ 15 km, vélo/trottinette ≤ 25 km
+  - Adresse entreprise : 1362 Av. des Platanes, 34970 Lattes
+- Jours bien-être : 5 jours/an
+  - Éligibilité : ≥ 15 activités physiques sur les 12 derniers mois
+- Ces paramètres (5%, 15 activités) sont DYNAMIQUES (variables Kestra)
+
+## TESTS — OBLIGATOIRES
+- Chaque tâche Kestra DOIT avoir un test associé validant son exécution
+- Tests SODA sur la couche Silver (qualité des données)
+- Tests pytest pour chaque module Python
+- Tester les cas limites : salarié à 0 km, salarié à 50 km en marche, 
+  14 vs 15 activités, salaire à 0, etc.
+
+## DOCKER
+- Kestra : ports 8082:8080 et 8083:8081 (éviter conflit avec Kestra existant)
+- Metabase : port 3000:3000
+- DuckDB : volume partagé entre Kestra et Metabase
+- PostgreSQL Kestra : port 5433:5432 (éviter conflit avec le PostgreSQL existant)
+
+## CONVENTIONS DE CODE
+- Python : PEP 8, type hints, docstrings Google style
+- Logging : module `logging` Python, niveau INFO par défaut
+- SQL : majuscules pour les mots-clés, snake_case pour les colonnes
+- YAML Kestra : commentaires en français pour les flows
+- Fichiers : snake_case, noms descriptifs
+
+## DOCUMENTATION
+- README.md : toujours à jour avec l'architecture, les instructions de lancement,
+  et la description des flows
+- Docstrings sur toutes les fonctions publiques
+- CHANGELOG implicite via les commits conventionnels

@@ -1,0 +1,58 @@
+# ============================================================
+# SODA Checks — Couche Silver
+# Validation de la qualité des données après nettoyage
+# ============================================================
+
+# --- Employés (silver.employees) ---
+checks for silver.employees:
+  # Intégrité structurelle
+  - row_count = 161
+  - duplicate_count(id_salarie) = 0
+
+  # Pas de valeurs nulles sur les champs critiques
+  - missing_count(id_salarie) = 0
+  - missing_count(nom) = 0
+  - missing_count(prenom) = 0
+  - missing_count(salaire_brut) = 0
+  - missing_count(adresse_domicile) = 0
+  - missing_count(moyen_deplacement) = 0
+
+  # Plages de valeurs réalistes
+  - min(salaire_brut) >= 20000
+  - max(salaire_brut) <= 100000
+
+  # Valeurs attendues pour les catégories
+  - invalid_count(moyen_deplacement) = 0:
+      valid values:
+        - "Marche/running"
+        - "Vélo/Trottinette/Autres"
+        - "Transports en commun"
+        - "véhicule thermique/électrique"
+
+  - invalid_count(type_contrat) = 0:
+      valid values:
+        - "CDI"
+        - "CDD"
+
+  - invalid_count(bu) = 0:
+      valid values:
+        - "Finance"
+        - "Support"
+        - "Ventes"
+        - "R&D"
+        - "Marketing"
+
+# --- Distances (silver.distances) ---
+checks for silver.distances:
+  - missing_count(id_salarie) = 0
+  - missing_count(distance_km) = 0
+  - min(distance_km) >= 0
+  - max(distance_km) <= 200
+
+# --- Activités Strava (silver.strava_activities) ---
+checks for silver.strava_activities:
+  - missing_count(id_salarie) = 0
+  - missing_count(date_debut) = 0
+  - missing_count(sport_type) = 0
+  - min(distance_m) >= 0:
+      filter: distance_m IS NOT NULL

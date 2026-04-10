@@ -1,0 +1,266 @@
+# 🏃 POC Avantages Sportifs — Sport Data Solution
+
+> Pipeline data end-to-end pour évaluer et calculer les avantages sportifs des salariés.
+
+---
+
+## 📋 Contexte
+
+Sport Data Solution souhaite récompenser les salariés ayant une pratique sportive régulière via deux avantages :
+
+| Avantage | Description | Condition d'éligibilité |
+|----------|-------------|------------------------|
+| **Prime sportive** | 5% du salaire annuel brut | Déplacement domicile-bureau en mode sportif (vélo, marche, trottinette...) avec distance cohérente |
+| **5 jours bien-être** | Jours de congé supplémentaires | ≥ 15 activités physiques déclarées sur les 12 derniers mois |
+
+Ce POC vise à tester la faisabilité technique, collecter les bonnes données et mesurer l'impact financier.
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────┐    ┌─────────────┐    ┌──────────────────────────────────────┐
+│ Fichier RH  │───▶│             │    │          DuckDB                      │
+│ (.xlsx)     │    │  Ingestion  │───▶│  ┌──────────┐                       │
+├─────────────┤    │  Python     │    │  │  BRONZE  │ Données brutes        │
+│ Fichier     │───▶│  Scripts    │    │  │  (raw)   │                       │
+│ Sportif     │    │             │    │  └────┬─────┘                       │
+├─────────────┤    ├─────────────┤    │       ▼                             │
+│ API Google  │───▶│  API Calls  │───▶│  ┌──────────┐                       │
+│ Maps        │    │  Distances  │    │  │  SILVER  │ Nettoyé + testé       │
+├─────────────┤    │  Simulation │    │  │(cleaned) │ (SODA checks)         │
+│ Simulation  │───▶│             │    │  └────┬─────┘                       │
+│ Strava      │    └─────────────┘    │       ▼                             │
+│             │                       │  ┌──────────┐                       │
+│             │                       │  │   GOLD   │ KPI, éligibilité,     │
+│             │                       │  │(business)│ coûts, anomalies      │
+│             │                       │  └──────────┘                       │
+└─────────────┘                       └──────────────────────────────────────┘
+                                              │
+                    ┌─────────────────────────┼─────────────────────────┐
+                    ▼                         ▼                         ▼
+            ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
+            │   Metabase   │         │    Slack     │         │   Alertes    │
+            │  Dashboard   │         │  Webhook     │         │  Anomalies   │
+            │  (port 3000) │         │  Notifs      │         │  distance    │
+            └──────────────┘         └──────────────┘         └──────────────┘
+
+                    Orchestré par Kestra (port 8082)
+```
+
+---
+
+## 🛠️ Stack technique
+
+| Composant | Rôle | Justification |
+|-----------|------|---------------|
+| **Python 3.11+** | Pipeline ETL | Standard data engineering, écosystème riche |
+| **DuckDB** | Base analytique | Zéro serveur, SQL standard, schemas Bronze/Silver/Gold |
+| **Kestra** | Orchestration + monitoring | Flows YAML, UI web, logs, alertes, retry intégrés |
+| **Metabase** | Dashboards | Open-source, connecteur DuckDB, démo live |
+| **Docker Compose** | Infrastructure | Déploiement en une commande |
+| **SODA Core** | Tests qualité données | Checks déclaratifs YAML |
+| **pytest** | Tests unitaires | Tests fonctions métier Python |
+
+---
+
+## 🚀 Démarrage rapide
+
+### Prérequis
+- Docker & Docker Compose
+- Python 3.11+
+- Clé API Google Maps (pour le calcul des distances)
+
+### Installation
+
+```bash
+# Cloner le repo
+git clone <repo-url>
+cd poc-avantages-sportifs
+
+# Créer l'environnement Python
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+pip install -r requirements.txt
+
+# Lancer l'infrastructure
+docker-compose up -d
+
+# Vérifier que tout tourne
+docker-compose ps
+```
+
+### Accès aux services
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Kestra UI | http://localhost:8082 | Orchestration & monitoring |
+| Metabase | http://localhost:3000 | Dashboards KPI |
+
+---
+
+## 📁 Structure du projet
+
+```
+poc-avantages-sportifs/
+├── input/                    # Données sources Excel
+│   ├── Donnees_RH.xlsx       # 161 salariés, 11 colonnes
+│   └── Donnees_Sportive.xlsx # 161 lignes, ID + sport
+├── src/
+│   ├── ingestion/            # Bronze : chargement brut
+│   ├── transformation/       # Silver : nettoyage + qualité
+│   ├── business/             # Gold : KPI + éligibilité
+│   ├── notifications/        # Messages Slack
+│   ├── tests/                # pytest + SODA checks
+│   └── utils/                # Connexion DB, logging
+├── kestra/flows/             # Flows d'orchestration YAML
+├── docker/                   # Dockerfiles, plugins Metabase
+├── docker-compose.yml        # Infrastructure complète
+└── docs/                     # Documentation technique
+```
+
+---
+
+## 🔄 Flows Kestra
+
+| Flow | Description | Entrée | Sortie |
+|------|-------------|--------|--------|
+| `01_ingestion` | Charge les Excel + API → Bronze | Fichiers Excel, API | `bronze.*` |
+| `02_transformation` | Nettoie + teste → Silver | `bronze.*` | `silver.*` |
+| `03_business` | Calcule KPI + éligibilités → Gold | `silver.*` | `gold.*` |
+| `04_notifications` | Envoie les messages Slack | `gold.*`, `silver.strava_activities` | Messages Slack |
+| `05_full_pipeline` | Exécute tout de bout en bout | — | — |
+
+Chaque flow contient des tests intégrés validant l'exécution de chaque tâche.
+
+---
+
+## 🧪 Tests
+
+### Tests de qualité des données (SODA)
+```bash
+# Exécutés automatiquement dans le flow 02_transformation
+# Configuration : src/tests/soda/checks.yml
+```
+
+Checks implémentés :
+- Distances ≥ 0 et cohérentes avec le mode de déplacement
+- Dates valides et logiques
+- Unicité des ID salariés
+- Salaires dans une plage réaliste (25k–80k €)
+- Pas de valeurs nulles sur les champs critiques
+
+### Tests unitaires (pytest)
+```bash
+python -m pytest src/tests/ -v
+```
+
+Couverture :
+- Calcul de la prime avec différents taux
+- Éligibilité jours bien-être (seuil 14/15/16 activités)
+- Formatage des messages Slack
+- Détection des anomalies de distance
+
+---
+
+## 📊 Données
+
+### Fichier RH (161 salariés)
+| Colonne | Description |
+|---------|-------------|
+| ID salarié | Identifiant unique |
+| Nom, Prénom | Identité |
+| Date de naissance | Date |
+| BU | Finance, Support, Ventes, R&D, Marketing |
+| Date d'embauche | Date |
+| Salaire brut | Annuel, entre 25 570 € et 74 990 € |
+| Type de contrat | CDI ou CDD |
+| Nombre de jours de CP | 25 à 29 |
+| Adresse du domicile | Adresse complète |
+| Moyen de déplacement | 4 catégories |
+
+### Moyens de déplacement
+| Mode | Effectif | Éligible prime |
+|------|----------|----------------|
+| Véhicule thermique/électrique | 73 | ❌ |
+| Vélo/Trottinette/Autres | 54 | ✅ |
+| Transports en commun | 20 | ❌ |
+| Marche/running | 14 | ✅ |
+
+### Règles de validation distance (API Google Maps)
+- Adresse entreprise : **1362 Av. des Platanes, 34970 Lattes**
+- Marche/running : ≤ 15 km
+- Vélo/Trottinette/Autres : ≤ 25 km
+- Au-delà → anomalie remontée
+
+---
+
+## ⚙️ Paramètres dynamiques
+
+Ces valeurs sont externalisées en variables Kestra et modifiables sans toucher au code :
+
+| Paramètre | Valeur par défaut | Description |
+|-----------|-------------------|-------------|
+| `PRIME_RATE` | 0.05 | Taux de la prime (5%) |
+| `WELLBEING_THRESHOLD` | 15 | Nombre minimum d'activités pour les jours bien-être |
+| `WALK_MAX_DISTANCE_KM` | 15 | Distance max marche/running |
+| `BIKE_MAX_DISTANCE_KM` | 25 | Distance max vélo/trottinette |
+| `COMPANY_ADDRESS` | 1362 Av. des Platanes, 34970 Lattes | Adresse de référence |
+
+---
+
+## 🐳 Docker
+
+```yaml
+# Ports utilisés
+Kestra UI    : localhost:8082  (API: 8083)
+Metabase     : localhost:3000
+PostgreSQL   : localhost:5433  (backend Kestra)
+```
+
+```bash
+# Démarrer
+docker-compose up -d
+
+# Arrêter
+docker-compose down
+
+# Logs
+docker-compose logs -f kestra
+docker-compose logs -f metabase
+```
+
+---
+
+## 🔀 Git Workflow
+
+```
+main (prod) ◄──── merge uniquement par le développeur
+  │
+  └── develop (dev) ◄──── tous les commits ici
+```
+
+- **`main`** : branche de production, jamais de commit direct
+- **`develop`** : branche de développement active
+- Commits au format **Conventional Commits** : `type(scope): description en français`
+
+---
+
+## 📈 Évolutions possibles
+
+| Actuel (POC) | Évolution production |
+|--------------|---------------------|
+| DuckDB local | MotherDuck (cloud) |
+| Simulation Strava | API Strava réelle |
+| Slack webhook | Slack App complète |
+| Metabase local | Metabase Cloud |
+| Kestra local | Kestra Enterprise |
+
+---
+
+## 👥 Équipe
+
+- **Juliette** — Cofondatrice, porteuse du projet
+- **Alexandre** — Cofondateur
+- **Vous** — Data Engineer, responsable du POC

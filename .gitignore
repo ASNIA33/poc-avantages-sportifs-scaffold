@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
+data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+*.env
+
+# Docker volumes
+docker/metabase/metabase.db/
+
+# Logs
+*.log
+logs/
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# SODA
+.soda/
