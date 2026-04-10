@@ -17,7 +17,7 @@ services:
       POSTGRES_USER: kestra
       POSTGRES_PASSWORD: kestra_pwd
     volumes:
-      - postgres_sports_data:/var/lib/postgresql/data
+      - postgres_sports_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kestra -d kestra_sports"]
       interval: 10s
