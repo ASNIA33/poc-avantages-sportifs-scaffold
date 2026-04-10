@@ -71,6 +71,27 @@ Sources (Excel, API, Simulation)
 - PostgreSQL Kestra : 5433 (interne 5432)
 - Metabase : 3000
 
+## Couche Bronze — Ingestion
+
+### Module `src/ingestion/load_excel.py`
+
+Deux fonctions principales, toutes deux basées sur `db_session` (gestionnaire de contexte DuckDB) :
+
+| Fonction | Source | Table cible |
+|----------|--------|-------------|
+| `load_rh_to_bronze()` | `input/Donnees_RH.xlsx` | `bronze.rh_raw` |
+| `load_sports_to_bronze()` | `input/Donnees_Sportive.xlsx` | `bronze.sports_raw` |
+
+**Normalisation des colonnes :**
+- Suppression des accents via `unicodedata.normalize("NFD")`
+- Conversion en minuscules
+- Remplacement des caractères non alphanumériques par `_`
+- Exemples : `ID salarié` → `id_salarie`, `Prénom` → `prenom`, `Date d'embauche` → `date_d_embauche`
+
+**Colonne technique ajoutée :** `_ingested_at` (timestamp UTC) sur chaque ligne.
+
+**Création des tables :** `CREATE OR REPLACE TABLE` — idempotent, relançable sans effet de bord.
+
 ## Tests
 
 ### Stratégie à 3 niveaux
@@ -80,6 +101,19 @@ Sources (Excel, API, Simulation)
 | Tâche Kestra | Assertions dans le flow | Chaque tâche produit un résultat | `bronze.rh_raw` contient 161 lignes |
 | Qualité données | SODA Core | Couche Silver | Distance ≥ 0, dates valides |
 | Unitaire | pytest | Fonctions Python | Calcul prime = salaire × 0.05 |
+
+### Tests implémentés — Ingestion Bronze (`src/tests/test_ingestion.py`)
+
+| Test | Table | Vérification |
+|------|-------|--------------|
+| `test_load_rh_row_count` | `bronze.rh_raw` | Exactement 161 lignes |
+| `test_load_rh_columns_snake_case` | `bronze.rh_raw` | Colonnes `[a-z0-9_]+` uniquement |
+| `test_load_rh_no_null_id` | `bronze.rh_raw` | Aucun `id_salarie` null |
+| `test_load_rh_has_ingested_at` | `bronze.rh_raw` | `_ingested_at` présent et non null |
+| `test_load_sports_row_count` | `bronze.sports_raw` | Exactement 161 lignes |
+| `test_load_sports_no_null_id` | `bronze.sports_raw` | Aucun `id_salarie` null |
+
+Chaque test utilise une DB temporaire (`/tmp/test_ingestion.duckdb`) nettoyée avant et après exécution.
 
 ## Sécurité
 

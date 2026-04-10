@@ -98,6 +98,19 @@ docker-compose ps
 | Kestra UI | http://localhost:8082 | Orchestration & monitoring |
 | Metabase | http://localhost:3000 | Dashboards KPI |
 
+### Lancer les scripts manuellement
+
+```bash
+# Ingestion Excel → Bronze (RH + Sportif)
+python -m src.ingestion.load_excel
+
+# Lancer les tests d'ingestion
+python -m pytest src/tests/test_ingestion.py -v
+
+# Lancer tous les tests
+python -m pytest src/tests/ -v
+```
+
 ---
 
 ## 📁 Structure du projet
@@ -156,7 +169,8 @@ Checks implémentés :
 python -m pytest src/tests/ -v
 ```
 
-Couverture :
+Couverture actuelle :
+- **Ingestion Bronze** : nombre de lignes (161), colonnes snake_case, absence de nulls sur `id_salarie`, présence de `_ingested_at`
 - Calcul de la prime avec différents taux
 - Éligibilité jours bien-être (seuil 14/15/16 activités)
 - Formatage des messages Slack
