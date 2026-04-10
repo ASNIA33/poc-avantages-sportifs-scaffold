@@ -408,6 +408,106 @@ graph TD
     KE -.->|"source DuckDB"| MB
 ```
 
+## Couche Notifications — Slack
+
+### Module `src/notifications/slack_messenger.py`
+
+| Fonction | Description |
+|---|---|
+| `format_activity_message()` | Génère un message Slack motivant (templates variés, hash MD5 déterministe) |
+| `send_slack_message()` | POST webhook Slack ou dry-run si `SLACK_WEBHOOK_URL` absent |
+| `notify_recent_activities()` | Notifie toutes les activités dans une fenêtre temporelle (défaut 24h) |
+| `notify_single_activity()` | Notifie une activité spécifique par ID (démo live) |
+
+**Variété des messages :**
+- Index template = `MD5(nom) % len(templates)` → déterministe, reproductible, varié
+- 4 templates avec distance (ex: Running, Cycling), 4 sans (ex: Tennis, Yoga)
+- 8 phrases d'encouragement rotatives
+- Emojis mappés par sport (16 sports couverts)
+- Durée formatée : `< 60 min → "45 min"` | `>= 60 min → "1h30min"`
+
+**Mode dry-run :** si `SLACK_WEBHOOK_URL` n'est pas défini dans `.env`,
+les messages sont loggés en WARNING sans appel réseau — adapté au POC.
+
+### Tests implémentés — Notifications (`src/tests/test_notifications.py`)
+
+| Test | Vérification |
+|---|---|
+| `test_format_message_with_distance` | Distance en km (10800m → "10.8") et durée présents |
+| `test_format_message_without_distance` | Nom du sport et durée présents (Tennis, 1h30) |
+| `test_format_message_with_comment` | Commentaire entre guillemets en fin de message |
+| `test_format_duration_minutes` | 1800 s → "30 min" (< 60 min) |
+| `test_format_duration_hours` | 5400 s → "1h..." (>= 60 min) |
+| `test_send_dry_run` | Sans webhook → retourne False, pas d'exception |
+| `test_notify_recent_count` | count = nombre d'activités dans silver.strava_activities |
+
+## Flows Kestra — Orchestration
+
+### Structure des flows `kestra/flows/`
+
+```mermaid
+flowchart LR
+    F1["01-ingestion\n4 tâches + 4 tests\nBronze"]
+    F2["02-transformation\n4 tâches + 4 tests\nSilver"]
+    F3["03-business\n5 tâches + 5 tests\nGold"]
+    F4["04-notifications\n1 tâche\nSlack"]
+    F5["05-full-pipeline\nsubflows 1→2→3→4\nPipeline complet"]
+
+    F5 --> F1 --> F2 --> F3 --> F4
+```
+
+| Flow | ID Kestra | Tâches | Tests intégrés |
+|---|---|---|---|
+| `01_ingestion.yml` | `01-ingestion` | load_rh, load_sports, fetch_distances, generate_strava | 4 (lignes, nulls, positifs) |
+| `02_transformation.yml` | `02-transformation` | clean_rh, clean_sports, validate_distances, clean_strava | 4 (lignes, sportifs, Runing, distance_km) |
+| `03_business.yml` | `03-business` | compute_prime, compute_wellbeing, detect_anomalies, build_summary, build_leaderboard | 5 (lignes, montants, days_granted, total 161) |
+| `04_notifications.yml` | `04-notifications` | notify_recent_activities | — (dry-run) |
+| `05_full_pipeline.yml` | `05-full-pipeline` | Subflows 1→4 + print_summary | Via subflows |
+
+**Volumes montés dans Kestra (docker-compose.yml) :**
+- `./src` → `/app/src` — code source Python
+- `./data` → `/app/data` — fichier DuckDB
+- `./input` → `/app/input` — fichiers Excel source
+- `./kestra/flows` → `/app/flows` — flows YAML chargés au démarrage
+
+**Task runner :** `io.kestra.plugin.core.runner.Process` — exécution en subprocess
+dans le conteneur Kestra, avec `sys.path.insert(0, '/app')` pour accéder à `src.*`.
+
+**Paramètres dynamiques Kestra :**
+
+| Variable | Défaut | Flow |
+|---|---|---|
+| `db_path` | `/app/data/sports_poc.duckdb` | Tous |
+| `prime_rate` | `0.05` | 03-business |
+| `wellbeing_threshold` | `15` | 03-business |
+| `hours` | `24` | 04-notifications |
+
+## CLI local — main.py
+
+Script d'exécution du pipeline sans Kestra, via `argparse` :
+
+```
+python main.py run                        # Pipeline complet Bronze→Silver→Gold
+python main.py run --notify               # + notifications Slack
+python main.py run --prime-rate 0.08      # Taux prime override
+python main.py run --threshold 10         # Seuil bien-être override
+python main.py notify                     # Activités des 24 dernières heures
+python main.py notify --id 42             # Activité spécifique (démo live)
+python main.py status                     # Lignes par table DuckDB
+```
+
+**Résumé final affiché après `run` :**
+```
+=======================================================
+  RÉSUMÉ PIPELINE — POC Avantages Sportifs
+=======================================================
+  Prime sportive    :   67 éligibles | Coût total :   168 966,50 €
+  Jours bien-être   :   60 éligibles | 5 jours/an
+  Anomalies distance:    1 détectée(s)
+  Classement activités: 161 salariés classés
+=======================================================
+```
+
 ## Sécurité
 
 - Données RH non versionnées sur GitHub (`.gitignore`)

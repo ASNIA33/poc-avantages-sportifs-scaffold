@@ -153,9 +153,29 @@ python -m src.business.compute_wellbeing
 python -m src.business.detect_anomalies
 python -m src.business.build_summary
 
+# --- Pipeline complet en local (sans Kestra) ---
+
+# Pipeline complet Bronze → Silver → Gold
+python main.py run
+
+# Avec notifications Slack
+python main.py run --notify
+
+# Override des paramètres métier
+python main.py run --prime-rate 0.08 --threshold 10
+
+# Notifications seules (activités des 24h)
+python main.py notify
+
+# Notification pour une activité spécifique (démo live)
+python main.py notify --id 42
+
+# Statut du pipeline (lignes par table)
+python main.py status
+
 # --- Tests ---
 
-# Lancer tous les tests (ingestion + transformation + business)
+# Lancer tous les tests (ingestion + transformation + business + notifications)
 python -m pytest src/tests/ -v
 ```
 
@@ -217,11 +237,12 @@ Checks implémentés :
 python -m pytest src/tests/ -v
 ```
 
-Couverture actuelle — **58 tests** répartis sur 3 fichiers :
+Couverture actuelle — **65 tests** répartis sur 4 fichiers :
 
 - **Ingestion Bronze** (`test_ingestion.py`, 20 tests) : nombre de lignes (161), colonnes snake_case, absence de nulls sur `id_salarie`, présence de `_ingested_at`, données Strava et distances
 - **Transformation Silver** (`test_transformation.py`, 16 tests) : employees, sports_activities, distances (anomalies), strava_activities
 - **Calculs métier Gold** (`test_business.py`, 22 tests) : prime (taux 5% et personnalisé), jours bien-être (seuils 14 et 15), anomalies, résumé par BU, classement activités
+- **Notifications Slack** (`test_notifications.py`, 7 tests) : formatage messages (distance, durée, commentaire), dry-run webhook, comptage activités notifiées
 
 ---
 
