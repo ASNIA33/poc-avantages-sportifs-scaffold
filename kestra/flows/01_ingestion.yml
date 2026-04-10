@@ -1,0 +1,165 @@
+# =============================================================================
+# Flow 01 — Ingestion Bronze
+# Charge les fichiers Excel RH et Sportif, calcule les distances domicile-bureau
+# et génère les données Strava simulées dans la couche Bronze (DuckDB).
+#
+# Prérequis Kestra :
+#   - Python 3.11+ disponible dans l'environnement d'exécution
+#   - Packages installés : duckdb, pandas, openpyxl, requests, googlemaps, python-dotenv
+#   - Volumes montés :
+#       ./src    → /app/src    (code source Python)
+#       ./data   → /app/data   (fichier DuckDB)
+#       ./input  → /app/input  (fichiers Excel source)
+#   - sys.path inclut /app pour résoudre les imports src.*
+# =============================================================================
+
+id: 01-ingestion
+namespace: poc.avantages.sportifs
+description: |
+  Ingestion Bronze — Charge les données sources (Excel RH + Sportif, distances Google Maps,
+  simulation Strava) et les insère brutes dans les tables bronze.* de DuckDB.
+
+# Variables du flow — modifiables sans toucher au code
+variables:
+  db_path: "/app/data/sports_poc.duckdb"
+  project_root: "/app"
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Tâche 1 : Chargement fichier RH → bronze.rh_raw
+  # ---------------------------------------------------------------------------
+  - id: load_excel_rh
+    type: io.kestra.plugin.scripts.python.Script
+    description: Charge Donnees_RH.xlsx vers bronze.rh_raw (161 lignes attendues)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.ingestion.load_excel import load_rh_to_bronze
+      n = load_rh_to_bronze("{{ vars.db_path }}")
+      print(f"bronze.rh_raw : {n} lignes insérées")
+
+  # Test post-tâche : vérifie que bronze.rh_raw contient exactement 161 lignes
+  - id: test_rh_row_count
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] bronze.rh_raw doit contenir 161 lignes"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM bronze.rh_raw").fetchone()[0]
+      conn.close()
+      assert count == 161, f"[FAIL] bronze.rh_raw : attendu 161 lignes, obtenu {count}"
+      print(f"[PASS] bronze.rh_raw : {count} lignes — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 2 : Chargement fichier Sportif → bronze.sports_raw
+  # ---------------------------------------------------------------------------
+  - id: load_excel_sports
+    type: io.kestra.plugin.scripts.python.Script
+    description: Charge Donnees_Sportive.xlsx vers bronze.sports_raw (161 lignes attendues)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.ingestion.load_excel import load_sports_to_bronze
+      n = load_sports_to_bronze("{{ vars.db_path }}")
+      print(f"bronze.sports_raw : {n} lignes insérées")
+
+  # Test post-tâche : vérifie que bronze.sports_raw contient exactement 161 lignes
+  - id: test_sports_row_count
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] bronze.sports_raw doit contenir 161 lignes"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM bronze.sports_raw").fetchone()[0]
+      null_ids = conn.execute(
+        "SELECT COUNT(*) FROM bronze.sports_raw WHERE id_salarie IS NULL"
+      ).fetchone()[0]
+      conn.close()
+      assert count == 161, f"[FAIL] bronze.sports_raw : attendu 161, obtenu {count}"
+      assert null_ids == 0, f"[FAIL] bronze.sports_raw : {null_ids} id_salarie nuls"
+      print(f"[PASS] bronze.sports_raw : {count} lignes, 0 null id — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 3 : Calcul distances domicile-bureau → bronze.distances_raw
+  # ---------------------------------------------------------------------------
+  - id: fetch_distances
+    type: io.kestra.plugin.scripts.python.Script
+    description: Calcule les distances domicile-bureau (Google Maps API ou simulation haversine)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import os
+      from src.ingestion.fetch_distances import fetch_distances_to_bronze
+      api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
+      n = fetch_distances_to_bronze("{{ vars.db_path }}", api_key=api_key)
+      print(f"bronze.distances_raw : {n} lignes insérées")
+
+  # Test post-tâche : vérifie que bronze.distances_raw contient 68 lignes (sportifs uniquement)
+  - id: test_distances_row_count
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] bronze.distances_raw doit contenir 68 lignes (sportifs)"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM bronze.distances_raw").fetchone()[0]
+      neg = conn.execute(
+        "SELECT COUNT(*) FROM bronze.distances_raw WHERE distance_km <= 0"
+      ).fetchone()[0]
+      conn.close()
+      assert count == 68, f"[FAIL] bronze.distances_raw : attendu 68, obtenu {count}"
+      assert neg == 0, f"[FAIL] bronze.distances_raw : {neg} distance(s) <= 0"
+      print(f"[PASS] bronze.distances_raw : {count} lignes, toutes distances > 0 — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 4 : Génération données Strava simulées → bronze.strava_raw
+  # ---------------------------------------------------------------------------
+  - id: generate_strava
+    type: io.kestra.plugin.scripts.python.Script
+    description: Génère les activités sportives simulées (12 mois) pour les 95 sportifs
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.ingestion.generate_strava import generate_strava_data
+      n = generate_strava_data("{{ vars.db_path }}")
+      print(f"bronze.strava_raw : {n} activités générées")
+
+  # Test post-tâche : vérifie que bronze.strava_raw contient > 1 000 activités
+  - id: test_strava_row_count
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] bronze.strava_raw doit contenir > 1 000 lignes"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM bronze.strava_raw").fetchone()[0]
+      null_ids = conn.execute(
+        "SELECT COUNT(*) FROM bronze.strava_raw WHERE id_salarie IS NULL"
+      ).fetchone()[0]
+      conn.close()
+      assert count > 1000, f"[FAIL] bronze.strava_raw : attendu > 1000, obtenu {count}"
+      assert null_ids == 0, f"[FAIL] bronze.strava_raw : {null_ids} id_salarie nuls"
+      print(f"[PASS] bronze.strava_raw : {count} activités, 0 null id — OK")
