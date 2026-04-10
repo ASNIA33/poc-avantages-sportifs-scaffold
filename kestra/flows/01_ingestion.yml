@@ -19,6 +19,12 @@ description: |
   Ingestion Bronze — Charge les données sources (Excel RH + Sportif, distances Google Maps,
   simulation Strava) et les insère brutes dans les tables bronze.* de DuckDB.
 
+# Inputs déclarés — reçus depuis le flow 05-full-pipeline (Subflow)
+inputs:
+  - id: db_path
+    type: STRING
+    defaults: "/app/data/sports_poc.duckdb"
+
 # Variables du flow — modifiables sans toucher au code
 variables:
   db_path: "/app/data/sports_poc.duckdb"
@@ -43,7 +49,7 @@ tasks:
       sys.path.insert(0, "{{ vars.project_root }}")
       from src.ingestion.load_excel import load_rh_to_bronze
       n = load_rh_to_bronze("{{ vars.db_path }}")
-      print(f"bronze.rh_raw : {n} lignes insérées")
+      print("bronze.rh_raw : " + str(n) + " lignes insérées")
 
   # Test post-tâche : vérifie que bronze.rh_raw contient exactement 161 lignes
   - id: test_rh_row_count
@@ -62,8 +68,8 @@ tasks:
       conn = duckdb.connect("{{ vars.db_path }}")
       count = conn.execute("SELECT COUNT(*) FROM bronze.rh_raw").fetchone()[0]
       conn.close()
-      assert count == 161, f"[FAIL] bronze.rh_raw : attendu 161 lignes, obtenu {count}"
-      print(f"[PASS] bronze.rh_raw : {count} lignes — OK")
+      assert count == 161, "[FAIL] bronze.rh_raw : attendu 161 lignes, obtenu " + str(count)
+      print("[PASS] bronze.rh_raw : " + str(count) + " lignes — OK")
 
   # ---------------------------------------------------------------------------
   # Tâche 2 : Chargement fichier Sportif → bronze.sports_raw
@@ -82,7 +88,7 @@ tasks:
       sys.path.insert(0, "{{ vars.project_root }}")
       from src.ingestion.load_excel import load_sports_to_bronze
       n = load_sports_to_bronze("{{ vars.db_path }}")
-      print(f"bronze.sports_raw : {n} lignes insérées")
+      print("bronze.sports_raw : " + str(n) + " lignes insérées")
 
   # Test post-tâche : vérifie que bronze.sports_raw contient exactement 161 lignes
   - id: test_sports_row_count
@@ -104,9 +110,9 @@ tasks:
         "SELECT COUNT(*) FROM bronze.sports_raw WHERE id_salarie IS NULL"
       ).fetchone()[0]
       conn.close()
-      assert count == 161, f"[FAIL] bronze.sports_raw : attendu 161, obtenu {count}"
-      assert null_ids == 0, f"[FAIL] bronze.sports_raw : {null_ids} id_salarie nuls"
-      print(f"[PASS] bronze.sports_raw : {count} lignes, 0 null id — OK")
+      assert count == 161, "[FAIL] bronze.sports_raw : attendu 161, obtenu " + str(count)
+      assert null_ids == 0, "[FAIL] bronze.sports_raw : " + str(null_ids) + " id_salarie nuls"
+      print("[PASS] bronze.sports_raw : " + str(count) + " lignes, 0 null id — OK")
 
   # ---------------------------------------------------------------------------
   # Tâche 3 : Calcul distances domicile-bureau → bronze.distances_raw
@@ -127,7 +133,7 @@ tasks:
       from src.ingestion.fetch_distances import fetch_distances_to_bronze
       api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
       n = fetch_distances_to_bronze("{{ vars.db_path }}", api_key=api_key)
-      print(f"bronze.distances_raw : {n} lignes insérées")
+      print("bronze.distances_raw : " + str(n) + " lignes insérées")
 
   # Test post-tâche : vérifie que bronze.distances_raw contient 68 lignes (sportifs uniquement)
   - id: test_distances_row_count
@@ -149,9 +155,9 @@ tasks:
         "SELECT COUNT(*) FROM bronze.distances_raw WHERE distance_km <= 0"
       ).fetchone()[0]
       conn.close()
-      assert count == 68, f"[FAIL] bronze.distances_raw : attendu 68, obtenu {count}"
-      assert neg == 0, f"[FAIL] bronze.distances_raw : {neg} distance(s) <= 0"
-      print(f"[PASS] bronze.distances_raw : {count} lignes, toutes distances > 0 — OK")
+      assert count == 68, "[FAIL] bronze.distances_raw : attendu 68, obtenu " + str(count)
+      assert neg == 0, "[FAIL] bronze.distances_raw : " + str(neg) + " distance(s) <= 0"
+      print("[PASS] bronze.distances_raw : " + str(count) + " lignes, toutes distances > 0 — OK")
 
   # ---------------------------------------------------------------------------
   # Tâche 4 : Génération données Strava simulées → bronze.strava_raw
@@ -170,7 +176,7 @@ tasks:
       sys.path.insert(0, "{{ vars.project_root }}")
       from src.ingestion.generate_strava import generate_strava_data
       n = generate_strava_data("{{ vars.db_path }}")
-      print(f"bronze.strava_raw : {n} activités générées")
+      print("bronze.strava_raw : " + str(n) + " activités générées")
 
   # Test post-tâche : vérifie que bronze.strava_raw contient > 1 000 activités
   - id: test_strava_row_count
@@ -192,6 +198,6 @@ tasks:
         "SELECT COUNT(*) FROM bronze.strava_raw WHERE id_salarie IS NULL"
       ).fetchone()[0]
       conn.close()
-      assert count > 1000, f"[FAIL] bronze.strava_raw : attendu > 1000, obtenu {count}"
-      assert null_ids == 0, f"[FAIL] bronze.strava_raw : {null_ids} id_salarie nuls"
-      print(f"[PASS] bronze.strava_raw : {count} activités, 0 null id — OK")
+      assert count > 1000, "[FAIL] bronze.strava_raw : attendu > 1000, obtenu " + str(count)
+      assert null_ids == 0, "[FAIL] bronze.strava_raw : " + str(null_ids) + " id_salarie nuls"
+      print("[PASS] bronze.strava_raw : " + str(count) + " activités, 0 null id — OK")

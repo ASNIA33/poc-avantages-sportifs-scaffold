@@ -16,6 +16,15 @@ description: |
   sportives récentes des salariés. En mode dry-run si SLACK_WEBHOOK_URL n'est
   pas configuré (adapté au POC).
 
+# Inputs déclarés — reçus depuis le flow 05-full-pipeline (Subflow)
+inputs:
+  - id: db_path
+    type: STRING
+    defaults: "/app/data/sports_poc.duckdb"
+  - id: hours
+    type: STRING
+    defaults: "24"
+
 variables:
   db_path: "/app/data/sports_poc.duckdb"
   project_root: "/app"
@@ -48,7 +57,7 @@ tasks:
         hours=int("{{ vars.hours }}"),
         webhook_url=webhook,
       )
-      print(f"Notifications : {count} message(s) traité(s) sur les dernières {{ vars.hours }}h")
+      print("Notifications : " + str(count) + " message(s) traité(s) sur les dernières {{ vars.hours }}h")
 
   # ---------------------------------------------------------------------------
   # Tâche 2 (optionnelle) : Notifier une activité spécifique par ID (démo live)

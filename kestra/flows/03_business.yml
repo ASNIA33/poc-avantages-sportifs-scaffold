@@ -12,6 +12,18 @@ description: |
   jours bien-être (seuil paramétrable), anomalies de distance, résumé coûts par BU
   et classement des activités.
 
+# Inputs déclarés — reçus depuis le flow 05-full-pipeline (Subflow)
+inputs:
+  - id: db_path
+    type: STRING
+    defaults: "/app/data/sports_poc.duckdb"
+  - id: prime_rate
+    type: FLOAT
+    defaults: 0.05
+  - id: wellbeing_threshold
+    type: INT
+    defaults: 15
+
 variables:
   db_path: "/app/data/sports_poc.duckdb"
   project_root: "/app"
@@ -38,7 +50,7 @@ tasks:
       sys.path.insert(0, "{{ vars.project_root }}")
       from src.business.compute_prime import compute_prime_eligibility
       n = compute_prime_eligibility("{{ vars.db_path }}", prime_rate=float("{{ vars.prime_rate }}"))
-      print(f"gold.prime_eligibility : {n} lignes (taux {{ vars.prime_rate }})")
+      print("gold.prime_eligibility : " + str(n) + " lignes (taux {{ vars.prime_rate }})")
 
   # Test post-tâche : 68 lignes, éligibles ont prime > 0, non éligibles ont prime = 0
   - id: test_prime
@@ -63,10 +75,10 @@ tasks:
         "SELECT COUNT(*) FROM gold.prime_eligibility WHERE is_eligible = TRUE AND prime_montant <= 0"
       ).fetchone()[0]
       conn.close()
-      assert count == 68, f"[FAIL] prime_eligibility : attendu 68, obtenu {count}"
+      assert count == 68, "[FAIL] prime_eligibility : attendu 68, obtenu " + str(count)
       assert eligible > 0, "[FAIL] prime_eligibility : aucun salarié éligible"
-      assert bad_montant == 0, f"[FAIL] prime_eligibility : {bad_montant} éligible(s) avec montant <= 0"
-      print(f"[PASS] gold.prime_eligibility : {count} lignes, {eligible} éligibles — OK")
+      assert bad_montant == 0, "[FAIL] prime_eligibility : " + str(bad_montant) + " éligible(s) avec montant <= 0"
+      print("[PASS] gold.prime_eligibility : " + str(count) + " lignes, " + str(eligible) + " éligibles — OK")
 
   # ---------------------------------------------------------------------------
   # Tâche 2 : Calcul éligibilité jours bien-être → gold.wellbeing_eligibility
@@ -87,9 +99,9 @@ tasks:
       n = compute_wellbeing_eligibility(
         "{{ vars.db_path }}", threshold=int("{{ vars.wellbeing_threshold }}")
       )
-      print(f"gold.wellbeing_eligibility : {n} lignes (seuil {{ vars.wellbeing_threshold }} activités)")
+      print("gold.wellbeing_eligibility : " + str(n) + " lignes (seuil {{ vars.wellbeing_threshold }} activités)")
 
-  # Test post-tâche : 161 lignes, days_granted cohérent avec is_eligible
+  # Test post-tâche : 161 lignes, days_granted dans {0, 5}, cohérence is_eligible
   - id: test_wellbeing
     type: io.kestra.plugin.scripts.python.Script
     description: "[TEST] gold.wellbeing_eligibility : 161 lignes, days_granted dans {0, 5}"
@@ -112,9 +124,9 @@ tasks:
         "SELECT COUNT(*) FROM gold.wellbeing_eligibility WHERE is_eligible = TRUE"
       ).fetchone()[0]
       conn.close()
-      assert count == 161, f"[FAIL] wellbeing_eligibility : attendu 161, obtenu {count}"
-      assert bad_days == 0, f"[FAIL] wellbeing_eligibility : {bad_days} days_granted hors {{0,5}}"
-      print(f"[PASS] gold.wellbeing_eligibility : {count} lignes, {eligible} éligibles — OK")
+      assert count == 161, "[FAIL] wellbeing_eligibility : attendu 161, obtenu " + str(count)
+      assert bad_days == 0, "[FAIL] wellbeing_eligibility : " + str(bad_days) + " days_granted hors {0,5}"
+      print("[PASS] gold.wellbeing_eligibility : " + str(count) + " lignes, " + str(eligible) + " éligibles — OK")
 
   # ---------------------------------------------------------------------------
   # Tâche 3 : Détection anomalies de distance → gold.distance_anomalies
@@ -133,7 +145,7 @@ tasks:
       sys.path.insert(0, "{{ vars.project_root }}")
       from src.business.detect_anomalies import detect_distance_anomalies
       n = detect_distance_anomalies("{{ vars.db_path }}")
-      print(f"gold.distance_anomalies : {n} anomalie(s) détectée(s)")
+      print("gold.distance_anomalies : " + str(n) + " anomalie(s) détectée(s)")
 
   # Test post-tâche : toutes les anomalies ont anomaly_reason non nul
   - id: test_anomalies
@@ -155,8 +167,8 @@ tasks:
       ).fetchone()[0]
       count = conn.execute("SELECT COUNT(*) FROM gold.distance_anomalies").fetchone()[0]
       conn.close()
-      assert no_reason == 0, f"[FAIL] distance_anomalies : {no_reason} sans anomaly_reason"
-      print(f"[PASS] gold.distance_anomalies : {count} anomalie(s), toutes avec raison — OK")
+      assert no_reason == 0, "[FAIL] distance_anomalies : " + str(no_reason) + " sans anomaly_reason"
+      print("[PASS] gold.distance_anomalies : " + str(count) + " anomalie(s), toutes avec raison — OK")
 
   # ---------------------------------------------------------------------------
   # Tâche 4 : Résumé des coûts par BU → gold.cost_summary
@@ -175,7 +187,7 @@ tasks:
       sys.path.insert(0, "{{ vars.project_root }}")
       from src.business.build_summary import build_cost_summary
       n = build_cost_summary("{{ vars.db_path }}")
-      print(f"gold.cost_summary : {n} lignes (5 BU + TOTAL)")
+      print("gold.cost_summary : " + str(n) + " lignes (5 BU + TOTAL)")
 
   # Test post-tâche : 6 lignes (5 BU + 1 TOTAL), total salariés = 161
   - id: test_cost_summary
@@ -197,9 +209,9 @@ tasks:
         "SELECT nb_total_salaries FROM gold.cost_summary WHERE bu = 'TOTAL'"
       ).fetchone()[0]
       conn.close()
-      assert count == 6, f"[FAIL] cost_summary : attendu 6 lignes, obtenu {count}"
-      assert total_sal == 161, f"[FAIL] cost_summary : TOTAL.nb_total_salaries = {total_sal}, attendu 161"
-      print(f"[PASS] gold.cost_summary : {count} lignes, TOTAL={total_sal} salariés — OK")
+      assert count == 6, "[FAIL] cost_summary : attendu 6 lignes, obtenu " + str(count)
+      assert total_sal == 161, "[FAIL] cost_summary : TOTAL.nb_total_salaries = " + str(total_sal) + ", attendu 161"
+      print("[PASS] gold.cost_summary : " + str(count) + " lignes, TOTAL=" + str(total_sal) + " salariés — OK")
 
   # ---------------------------------------------------------------------------
   # Tâche 5 : Classement des activités → gold.activity_leaderboard
@@ -218,7 +230,7 @@ tasks:
       sys.path.insert(0, "{{ vars.project_root }}")
       from src.business.build_summary import build_activity_leaderboard
       n = build_activity_leaderboard("{{ vars.db_path }}")
-      print(f"gold.activity_leaderboard : {n} salariés classés")
+      print("gold.activity_leaderboard : " + str(n) + " salariés classés")
 
   # Test post-tâche : 161 lignes, classement commence à 1
   - id: test_leaderboard
@@ -238,6 +250,6 @@ tasks:
       count = conn.execute("SELECT COUNT(*) FROM gold.activity_leaderboard").fetchone()[0]
       min_rank = conn.execute("SELECT MIN(classement) FROM gold.activity_leaderboard").fetchone()[0]
       conn.close()
-      assert count == 161, f"[FAIL] activity_leaderboard : attendu 161, obtenu {count}"
-      assert min_rank == 1, f"[FAIL] activity_leaderboard : MIN(classement) = {min_rank}, attendu 1"
-      print(f"[PASS] gold.activity_leaderboard : {count} salariés, classement min = {min_rank} — OK")
+      assert count == 161, "[FAIL] activity_leaderboard : attendu 161, obtenu " + str(count)
+      assert min_rank == 1, "[FAIL] activity_leaderboard : MIN(classement) = " + str(min_rank) + ", attendu 1"
+      print("[PASS] gold.activity_leaderboard : " + str(count) + " salariés, classement min = " + str(min_rank) + " — OK")
