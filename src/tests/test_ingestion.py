@@ -7,6 +7,7 @@ import pytest
 
 from src.ingestion.load_excel import load_rh_to_bronze, load_sports_to_bronze
 from src.ingestion.generate_strava import generate_strava_data
+from src.ingestion.fetch_distances import fetch_distances_to_bronze, _calculate_distance_haversine
 
 TEST_DB = "/tmp/test_ingestion.duckdb"
 
@@ -199,3 +200,87 @@ def test_strava_only_sportifs(strava_db) -> None:
     assert rows[0][0] == 0, (
         f"Trouvé {rows[0][0]} salarié(s) dans strava_raw absent(s) ou sans sport dans sports_raw"
     )
+
+
+# ---------------------------------------------------------------------------
+# Fixture Distances
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def distances_db() -> None:
+    """Peuple la base de test avec RH et les distances calculées en mode simulation.
+
+    Passe api_key="" pour garantir l'utilisation du mode haversine (pas d'appel API).
+    Doit être utilisé après clean_test_db (autouse), qui garantit une DB propre.
+    """
+    load_rh_to_bronze(TEST_DB)
+    fetch_distances_to_bronze(TEST_DB, api_key="")
+
+
+# ---------------------------------------------------------------------------
+# Tests Distances
+# ---------------------------------------------------------------------------
+
+@pytest.mark.ingestion
+def test_distances_row_count(distances_db) -> None:
+    """bronze.distances_raw doit contenir exactement 68 lignes (salariés sportifs)."""
+    rows = _query("SELECT COUNT(*) FROM bronze.distances_raw")
+    count = rows[0][0]
+    assert count == 68, f"Attendu 68 lignes, obtenu {count}"
+
+
+@pytest.mark.ingestion
+def test_distances_columns(distances_db) -> None:
+    """bronze.distances_raw doit contenir les 5 colonnes attendues."""
+    columns_raw = _query(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'bronze' AND table_name = 'distances_raw'"
+    )
+    columns = {row[0] for row in columns_raw}
+    expected = {"id_salarie", "adresse_domicile", "distance_km", "mode_transport", "source"}
+    assert expected == columns, f"Colonnes attendues : {expected}, obtenues : {columns}"
+
+
+@pytest.mark.ingestion
+def test_distances_positive(distances_db) -> None:
+    """Toutes les distances dans bronze.distances_raw doivent être strictement positives."""
+    rows = _query("SELECT COUNT(*) FROM bronze.distances_raw WHERE distance_km <= 0")
+    assert rows[0][0] == 0, f"Trouvé {rows[0][0]} distance(s) nulle(s) ou négative(s)"
+
+
+@pytest.mark.ingestion
+def test_distances_mode_coherent(distances_db) -> None:
+    """Marche/running → walking ; Vélo/Trottinette/Autres → bicycling."""
+    incoherents = _query(
+        """
+        SELECT COUNT(*) FROM bronze.distances_raw d
+        JOIN bronze.rh_raw r ON d.id_salarie = r.id_salarie
+        WHERE (r.moyen_de_deplacement = 'Marche/running'         AND d.mode_transport != 'walking')
+           OR (r.moyen_de_deplacement = 'Vélo/Trottinette/Autres' AND d.mode_transport != 'bicycling')
+        """
+    )
+    assert incoherents[0][0] == 0, (
+        f"Trouvé {incoherents[0][0]} ligne(s) avec mode_transport incohérent"
+    )
+
+
+@pytest.mark.ingestion
+def test_distances_no_null(distances_db) -> None:
+    """id_salarie et distance_km ne doivent contenir aucune valeur nulle."""
+    for col in ("id_salarie", "distance_km"):
+        rows = _query(f"SELECT COUNT(*) FROM bronze.distances_raw WHERE {col} IS NULL")
+        assert rows[0][0] == 0, f"Trouvé {rows[0][0]} valeur(s) nulle(s) dans '{col}'"
+
+
+@pytest.mark.ingestion
+def test_haversine_lattes() -> None:
+    """Salarié habitant Lattes → distance < 5 km du siège (aussi à Lattes)."""
+    distance = _calculate_distance_haversine("53 Av. de la Gare, 34970 Lattes")
+    assert distance < 5.0, f"Attendu < 5 km pour Lattes, obtenu {distance:.2f} km"
+
+
+@pytest.mark.ingestion
+def test_haversine_nimes() -> None:
+    """Salarié habitant Nîmes → distance > 30 km du siège à Lattes."""
+    distance = _calculate_distance_haversine("1 Rue de la Paix, 30000 Nîmes")
+    assert distance > 30.0, f"Attendu > 30 km pour Nîmes, obtenu {distance:.2f} km"
