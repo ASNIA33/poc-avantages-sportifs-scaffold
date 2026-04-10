@@ -1,0 +1,134 @@
+# =============================================================================
+# Flow 05 — Pipeline complet (end-to-end)
+# Orchestre les 4 flows dans l'ordre : Ingestion → Transformation → Business → Notifications.
+# Ce flow est le point d'entrée principal pour l'exécution complète du pipeline.
+#
+# Scheduling : cron quotidien à 8h (commenté par défaut pour le POC).
+# Pour activer : décommenter la section "triggers" et ajuster le cron.
+# =============================================================================
+
+id: 05-full-pipeline
+namespace: poc.avantages.sportifs
+description: |
+  Pipeline complet POC Avantages Sportifs — Exécute dans l'ordre :
+  1. Ingestion Bronze  (Excel RH, Sportif, distances, Strava)
+  2. Transformation Silver (nettoyage, typage, validation distances)
+  3. Calculs métier Gold (prime, bien-être, anomalies, résumés)
+  4. Notifications Slack (activités des 24 dernières heures)
+
+# Variables globales — propagées à tous les sous-flows
+variables:
+  db_path: "/app/data/sports_poc.duckdb"
+  project_root: "/app"
+  prime_rate: "0.05"
+  wellbeing_threshold: "15"
+  notify_hours: "24"
+
+# ---------------------------------------------------------------------------
+# Scheduling — Exécution quotidienne à 8h (commenté pour le POC)
+# Décommenter pour activer la planification en production
+# ---------------------------------------------------------------------------
+# triggers:
+#   - id: daily_schedule
+#     type: io.kestra.plugin.core.trigger.Schedule
+#     cron: "0 8 * * *"
+#     description: "Exécution quotidienne du pipeline complet à 8h"
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Étape 1 : Ingestion Bronze
+  # ---------------------------------------------------------------------------
+  - id: run_ingestion
+    type: io.kestra.plugin.core.flow.Subflow
+    description: |
+      Ingestion Bronze — Charge RH, Sportif, distances et Strava simulée.
+      Inclut les tests de validation post-ingestion.
+    namespace: poc.avantages.sportifs
+    flowId: 01-ingestion
+    wait: true
+    transmitFailed: true
+    inputs:
+      db_path: "{{ vars.db_path }}"
+
+  # ---------------------------------------------------------------------------
+  # Étape 2 : Transformation Silver
+  # ---------------------------------------------------------------------------
+  - id: run_transformation
+    type: io.kestra.plugin.core.flow.Subflow
+    description: |
+      Transformation Silver — Nettoie et type les 4 tables Bronze.
+      Inclut les tests de validation post-transformation.
+    namespace: poc.avantages.sportifs
+    flowId: 02-transformation
+    wait: true
+    transmitFailed: true
+    inputs:
+      db_path: "{{ vars.db_path }}"
+
+  # ---------------------------------------------------------------------------
+  # Étape 3 : Calculs métier Gold
+  # ---------------------------------------------------------------------------
+  - id: run_business
+    type: io.kestra.plugin.core.flow.Subflow
+    description: |
+      Calculs métier Gold — Prime, bien-être, anomalies, résumés et classements.
+      Paramètres prime_rate et wellbeing_threshold configurables.
+    namespace: poc.avantages.sportifs
+    flowId: 03-business
+    wait: true
+    transmitFailed: true
+    inputs:
+      db_path: "{{ vars.db_path }}"
+      prime_rate: "{{ vars.prime_rate }}"
+      wellbeing_threshold: "{{ vars.wellbeing_threshold }}"
+
+  # ---------------------------------------------------------------------------
+  # Étape 4 : Notifications Slack
+  # ---------------------------------------------------------------------------
+  - id: run_notifications
+    type: io.kestra.plugin.core.flow.Subflow
+    description: |
+      Notifications Slack — Messages de félicitations pour les activités récentes.
+      Mode dry-run si SLACK_WEBHOOK_URL n'est pas configuré.
+    namespace: poc.avantages.sportifs
+    flowId: 04-notifications
+    wait: true
+    transmitFailed: false
+    inputs:
+      db_path: "{{ vars.db_path }}"
+      hours: "{{ vars.notify_hours }}"
+
+  # ---------------------------------------------------------------------------
+  # Résumé final — affiche les KPI Gold en fin de pipeline
+  # ---------------------------------------------------------------------------
+  - id: print_summary
+    type: io.kestra.plugin.scripts.python.Script
+    description: Affiche le résumé final du pipeline (KPI Gold)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      n_prime = conn.execute(
+        "SELECT COUNT(*) FROM gold.prime_eligibility WHERE is_eligible = TRUE"
+      ).fetchone()[0]
+      cout_prime = conn.execute(
+        "SELECT COALESCE(SUM(prime_montant), 0) FROM gold.prime_eligibility"
+      ).fetchone()[0]
+      n_wellbeing = conn.execute(
+        "SELECT COUNT(*) FROM gold.wellbeing_eligibility WHERE is_eligible = TRUE"
+      ).fetchone()[0]
+      n_anomalies = conn.execute(
+        "SELECT COUNT(*) FROM gold.distance_anomalies"
+      ).fetchone()[0]
+      conn.close()
+      print("=" * 55)
+      print("  RÉSUMÉ PIPELINE — POC Avantages Sportifs")
+      print("=" * 55)
+      print(f"  Prime sportive    : {n_prime:>4} éligibles | Coût : {cout_prime:>12,.2f} €")
+      print(f"  Jours bien-être   : {n_wellbeing:>4} éligibles | 5 jours/an")
+      print(f"  Anomalies distance: {n_anomalies:>4} détectée(s)")
+      print("=" * 55)
