@@ -119,6 +119,24 @@ chore(docker): mise à jour des ports pour éviter les conflits
 - Format : `%(asctime)s | %(levelname)-8s | %(name)s | %(message)s`
 - Niveaux : INFO (défaut), WARNING (anomalies), ERROR (échecs)
 
+## Tests — Règle absolue
+
+### AUCUN COMMIT SANS TESTS VERTS
+Ne JAMAIS commiter si un test échoue. Ne JAMAIS restituer un résultat au développeur tant qu'un bug persiste.
+Workflow obligatoire :
+1. Coder la fonctionnalité
+2. Coder les tests
+3. `python -m pytest -v`
+4. Si FAIL → corriger → relancer → boucler jusqu'à 100% PASS
+5. Quand tout est vert → commit
+6. Restituer au développeur
+
+## Diagrammes — Mermaid
+- Utiliser la syntaxe Mermaid pour tous les diagrammes dans la documentation
+- README.md : diagramme d'architecture global en Mermaid
+- docs/architecture.md : diagrammes de flux détaillés par couche en Mermaid
+- Mettre à jour les diagrammes à chaque évolution du pipeline
+
 ## Style de code
 - PEP 8 strict
 - Type hints sur toutes les fonctions
