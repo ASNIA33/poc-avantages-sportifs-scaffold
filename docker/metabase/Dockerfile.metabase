@@ -24,6 +24,13 @@ RUN curl -fsSL -o /duckdb.metabase-driver.jar "${DUCKDB_DRIVER_URL}"
 # --- Étape 2 : image Metabase finale ---
 FROM metabase/metabase:latest
 
+# Installer libstdc++ requis par le driver natif DuckDB (JNI)
+# L'image Eclipse Temurin est Debian-based, on peut utiliser apt-get
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copier le driver dans le répertoire des plugins Metabase
 COPY --from=downloader /duckdb.metabase-driver.jar /plugins/duckdb.metabase-driver.jar
 
