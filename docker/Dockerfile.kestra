@@ -4,7 +4,7 @@ USER root
 
 # Installer les dépendances Python dans le conteneur
 RUN apt-get update && apt-get install -y --no-install-recommends python3-pip && \
-    pip install --break-system-packages --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk && \
+    pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk && \
     rm -rf /var/lib/apt/lists/*
 
 # Copier le code source
@@ -17,9 +17,10 @@ COPY requirements.txt /app/requirements.txt
 RUN mkdir -p /app/data && \
     id kestra 2>/dev/null && chown -R kestra:kestra /app || true
 
-# Set PYTHONPATH
+# Set PYTHONPATH et chemins projet
 ENV PYTHONPATH=/app
 ENV DUCKDB_PATH=/app/data/sports_poc.duckdb
+ENV PROJECT_ROOT=/app
 
 USER root
 

@@ -2,6 +2,7 @@
 
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Generator
 
 import duckdb
@@ -10,7 +11,11 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_DB_PATH = os.getenv("DUCKDB_PATH", "data/sports_poc.duckdb")
+# Racine du projet : 3 niveaux au-dessus de src/utils/db.py
+# En local  : calculé depuis __file__ (fonctionne quel que soit le CWD)
+# En Docker : PROJECT_ROOT=/app injecté via ENV dans Dockerfile.kestra
+_PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent.parent)))
+DEFAULT_DB_PATH = os.getenv("DUCKDB_PATH", str(_PROJECT_ROOT / "data" / "sports_poc.duckdb"))
 
 SCHEMAS = ["bronze", "silver", "gold"]
 

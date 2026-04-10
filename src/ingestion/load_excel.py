@@ -1,8 +1,10 @@
 """Ingestion des fichiers Excel RH et Sportif vers la couche Bronze (DuckDB)."""
 
+import os
 import re
 import unicodedata
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 
@@ -11,8 +13,12 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-RH_FILE = "input/Donnees_RH.xlsx"
-SPORTS_FILE = "input/Donnees_Sportive.xlsx"
+# Racine du projet : 3 niveaux au-dessus de src/ingestion/load_excel.py
+# En local  : calculé depuis __file__ (fonctionne quel que soit le CWD)
+# En Docker : PROJECT_ROOT=/app injecté via ENV dans Dockerfile.kestra
+PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent.parent)))
+RH_FILE = PROJECT_ROOT / "input" / "Donnees_RH.xlsx"
+SPORTS_FILE = PROJECT_ROOT / "input" / "Donnees_Sportive.xlsx"
 
 
 def _normalize_column_name(name: str) -> str:
