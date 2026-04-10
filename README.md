@@ -4,6 +4,27 @@
 
 ---
 
+## 📋 Table des matières
+
+- [Contexte](#-contexte)
+- [Architecture](#️-architecture)
+- [Stack technique](#️-stack-technique)
+- [Démarrage rapide](#-démarrage-rapide)
+- [Configuration](#️-configuration)
+- [Structure du projet](#-structure-du-projet)
+- [Flows Kestra](#-flows-kestra)
+- [Tests](#-tests)
+- [Données](#-données)
+- [Paramètres dynamiques](#️-paramètres-dynamiques)
+- [Docker](#-docker)
+- [Démo live soutenance](#-démo-live-soutenance)
+- [Troubleshooting](#-troubleshooting)
+- [Git Workflow](#-git-workflow)
+- [Évolutions possibles](#-évolutions-possibles)
+- [Équipe](#-équipe)
+
+---
+
 ## 📋 Contexte
 
 Sport Data Solution souhaite récompenser les salariés ayant une pratique sportive régulière via deux avantages :
@@ -32,7 +53,7 @@ flowchart LR
         direction TB
         Bronze["🟫 BRONZE\nDonnées brutes\nrh_raw · sports_raw\ndistances_raw · strava_raw"]
         Silver["🥈 SILVER\nNettoyé + Typé + SODA\nemployees · sports_activities\ndistances · strava_activities"]
-        Gold["🥇 GOLD\nKPI Métier\nprime_eligibility · wellbeing_eligibility\ncost_summary · distance_anomalies"]
+        Gold["🥇 GOLD\nKPI Métier\nprime_eligibility · wellbeing_eligibility\ncost_summary · distance_anomalies\nactivity_leaderboard"]
         Bronze --> Silver --> Gold
     end
 
@@ -87,16 +108,29 @@ flowchart LR
 git clone <repo-url>
 cd poc-avantages-sportifs
 
-# Créer l'environnement Python
+# Créer l'environnement Python (pour le développement local)
 python -m venv .venv
 source .venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 
-# Lancer l'infrastructure
+# Copier la configuration
+cp .env.example .env
+# Optionnel : éditer .env pour ajouter GOOGLE_MAPS_API_KEY / SLACK_WEBHOOK_URL
+
+# Construire les images Docker personnalisées (Metabase + driver DuckDB, pipeline)
+docker-compose build
+
+# Lancer l'infrastructure (PostgreSQL + Kestra + Metabase)
 docker-compose up -d
 
 # Vérifier que tout tourne
 docker-compose ps
+
+# Lancer le pipeline Bronze → Silver → Gold via Docker
+docker-compose run --rm pipeline-sports run
+
+# OU via Python local (plus rapide pour le développement)
+python main.py run
 ```
 
 ### Accès aux services
@@ -391,7 +425,7 @@ Ces valeurs sont externalisées en variables Kestra et modifiables sans toucher 
 
 ## 🐳 Docker
 
-```yaml
+```
 # Ports utilisés
 Kestra UI    : localhost:8082  (API: 8083)
 Metabase     : localhost:3000
@@ -399,15 +433,152 @@ PostgreSQL   : localhost:5433  (backend Kestra)
 ```
 
 ```bash
-# Démarrer
+# Construire les images
+docker-compose build
+
+# Démarrer l'infrastructure (sans pipeline)
 docker-compose up -d
+
+# Lancer le pipeline via Docker
+docker-compose run --rm pipeline-sports run
+
+# Lancer avec paramètres métier
+docker-compose run --rm pipeline-sports run --prime-rate 0.08 --threshold 10
+
+# Vérifier le statut
+docker-compose run --rm pipeline-sports status
 
 # Arrêter
 docker-compose down
 
 # Logs
-docker-compose logs -f kestra
-docker-compose logs -f metabase
+docker-compose logs -f kestra-sports
+docker-compose logs -f metabase-sports
+```
+
+---
+
+## 🎯 Démo live soutenance
+
+### Changer le taux de prime en direct
+
+```bash
+# Recalcul avec taux 8% au lieu de 5%
+python main.py run --prime-rate 0.08
+
+# Voir l'impact dans le résumé :
+#   Prime sportive : X éligibles | Coût total : Y € (×1.6 vs 5%)
+```
+
+### Insérer une nouvelle activité manuellement
+
+```python
+# Insérer via Python (exemple dans un shell interactif)
+import duckdb
+from datetime import datetime, timezone
+
+conn = duckdb.connect("data/sports_poc.duckdb")
+now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+# Remplacer id_salarie par un ID existant dans silver.employees
+conn.execute("""
+    INSERT INTO bronze.strava_raw
+        (id_salarie, sport_type, distance_m, temps_ecoule_s, date_debut, commentaire, _ingested_at)
+    VALUES (1, 'Run', 10000, 3000, ?, 'Belle sortie matinale !', ?)
+""", [now, now])
+conn.close()
+
+# Recalculer Silver + Gold + envoyer notification
+python main.py run
+python main.py notify
+```
+
+Ou utiliser le script prêt à l'emploi :
+
+```bash
+./scripts/demo.sh
+```
+
+### Voir les résultats dans Metabase
+
+1. Ouvrir http://localhost:3000
+2. Se connecter à la base DuckDB : chemin `/data/sports_poc.duckdb`
+3. Naviguer vers les tables `gold.*` pour les KPI
+4. Actualiser les dashboards après chaque relance du pipeline
+
+---
+
+## 🔧 Troubleshooting
+
+### PostgreSQL 18+ — erreur de volume
+
+**Symptôme :** Kestra ne démarre pas, logs PostgreSQL indiquent une erreur de répertoire.
+
+**Cause :** PostgreSQL 18 a changé sa structure de stockage. Monter sur `/var/lib/postgresql/data` est incompatible.
+
+**Solution appliquée dans `docker-compose.yml` :**
+```yaml
+# ✅ Correct (PostgreSQL 18+)
+volumes:
+  - postgres_sports_data:/var/lib/postgresql
+
+# ❌ Incorrect (ancienne syntaxe)
+# volumes:
+#   - postgres_sports_data:/var/lib/postgresql/data
+```
+
+Si le volume existant est corrompu :
+```bash
+docker-compose down -v        # supprime les volumes
+docker-compose up -d          # recrée depuis zéro
+```
+
+### Kestra — erreur de configuration storage
+
+**Symptôme :** Kestra démarre mais échoue sur l'initialisation du storage.
+
+**Cause :** La configuration `kestra.storage` est obligatoire en mode `server standalone`.
+
+**Solution appliquée dans `docker-compose.yml` :**
+```yaml
+KESTRA_CONFIGURATION: |
+  kestra:
+    storage:
+      type: local
+      local:
+        base-path: /app/storage
+    repository:
+      type: postgres
+    queue:
+      type: postgres
+```
+
+### Conflits de ports
+
+**Vérifier les ports occupés :**
+```bash
+docker ps --format "table {{.Names}}\t{{.Ports}}"
+# Ou plus précis :
+lsof -i :8082    # Kestra UI
+lsof -i :3000    # Metabase
+lsof -i :5433    # PostgreSQL Kestra
+```
+
+**Si un port est déjà utilisé**, modifier dans `docker-compose.yml` le port externe (ex: `8084:8080` au lieu de `8082:8080`).
+
+### Metabase — driver DuckDB non chargé
+
+**Symptôme :** DuckDB n'apparaît pas dans les types de base dans Metabase.
+
+**Cause :** Le driver JAR n'a pas été copié dans `/plugins/`.
+
+**Solution :**
+```bash
+# Reconstruire l'image Metabase
+docker-compose build metabase-sports
+docker-compose up -d metabase-sports
+# Vérifier dans les logs :
+docker-compose logs metabase-sports | grep -i duckdb
 ```
 
 ---

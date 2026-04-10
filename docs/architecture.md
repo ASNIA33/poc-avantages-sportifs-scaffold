@@ -1,5 +1,23 @@
 # Architecture technique — POC Avantages Sportifs
 
+## Table des matières
+
+- [Vue d'ensemble](#vue-densemble)
+- [Flux de données](#flux-de-données)
+- [Choix techniques détaillés](#choix-techniques-détaillés)
+- [Couche Bronze — Ingestion](#couche-bronze--ingestion)
+- [Tests](#tests)
+- [Couche Silver — Transformation](#couche-silver--transformation)
+- [Couche Gold — Calculs métier](#couche-gold--calculs-métier)
+- [Docker — Images et déploiement](#docker--images-et-déploiement)
+- [Couche Notifications — Slack](#couche-notifications--slack)
+- [Flows Kestra — Orchestration](#flows-kestra--orchestration)
+- [CLI local — main.py](#cli-local--mainpy)
+- [Problèmes rencontrés et solutions](#problèmes-rencontrés-et-solutions)
+- [Sécurité](#sécurité)
+
+---
+
 ## Vue d'ensemble
 
 Ce document détaille les choix d'architecture pour le POC Avantages Sportifs de Sport Data Solution.
@@ -407,16 +425,16 @@ Fixture `scope="module"` : Bronze + anomalie injectée (walking 20 km) + Silver 
 graph TD
     subgraph Compose["docker-compose.yml"]
         subgraph Services["Services"]
-            PG["postgres-sports\nImage: postgres:18\nPort: 5433→5432\nRôle: backend Kestra"]
-            KE["kestra-sports\nImage: kestra/kestra:latest\nPort: 8082→8080\nPort: 8083→8081\nDépend de: postgres"]
-            MB["metabase-sports\nBuild: Dockerfile.metabase\nPort: 3000→3000\nDriver DuckDB inclus"]
+            PG["postgres-sports\nImage: postgres:18\nPort: 5433→5432\nVolume: /var/lib/postgresql\nfix PostgreSQL 18+"]
+            KE["kestra-sports\nImage: kestra/kestra:latest\nPort: 8082→8080\nPort: 8083→8081\nstorage.type: local"]
+            MB["metabase-sports\nBuild: Dockerfile.metabase\nPort: 3000→3000\nDriver DuckDB v1.5.1.0"]
             PP["pipeline-sports\nBuild: Dockerfile.pipeline\nProfil: run\none-shot ETL"]
         end
 
         subgraph Volumes["Volumes"]
             VDB["./data\nfichier sports_poc.duckdb\nKestra + Metabase + Pipeline"]
-            VPG["postgres_sports_data\nPostgreSQL Kestra"]
-            VKE["kestra_sports_data\nflows + storage Kestra"]
+            VPG["postgres_sports_data\n/var/lib/postgresql\nfix: pas de /data"]
+            VKE["kestra_sports_data\n/app/storage\nstockage local Kestra"]
             VIN["./input\nfichiers Excel source"]
         end
     end
@@ -430,9 +448,20 @@ graph TD
     KE -.->|"depends_on"| PP
 ```
 
+**Corrections appliquées dans `docker-compose.yml` :**
+
+| Problème | Ancienne valeur | Valeur corrigée |
+|---|---|---|
+| PostgreSQL 18+ volume | `/var/lib/postgresql/data` | `/var/lib/postgresql` |
+| Kestra storage config | absent | `storage.type: local`, `base-path: /app/storage` |
+
 **Profil Docker `run`** : le service `pipeline-sports` ne démarre que si le profil est activé :
+
 ```bash
-docker-compose --profile run up pipeline-sports
+docker-compose build                               # construit les images
+docker-compose up -d                               # démarre infra (sans pipeline)
+docker-compose run --rm pipeline-sports run        # pipeline one-shot
+docker-compose run --rm pipeline-sports status     # statut des tables
 ```
 
 ### Scripts de démarrage
@@ -547,6 +576,93 @@ python main.py status                     # Lignes par table DuckDB
   Classement activités: 161 salariés classés
 =======================================================
 ```
+
+## Problèmes rencontrés et solutions
+
+### PostgreSQL 18+ — incompatibilité du volume
+
+**Contexte :** PostgreSQL 18 a modifié sa structure interne de stockage. Monter un volume sur `/var/lib/postgresql/data` provoque une erreur d'initialisation car PostgreSQL crée désormais des sous-dossiers supplémentaires.
+
+**Symptôme :**
+```
+initdb: error: directory "/var/lib/postgresql/data" exists but is not empty
+```
+
+**Solution :** Monter le volume sur le répertoire parent `/var/lib/postgresql` et laisser PostgreSQL créer lui-même son arborescence.
+
+```yaml
+# ✅ Compatible PostgreSQL 18+
+volumes:
+  - postgres_sports_data:/var/lib/postgresql
+
+# ❌ Incompatible
+# volumes:
+#   - postgres_sports_data:/var/lib/postgresql/data
+```
+
+**Commit de correction :** `fix(docker): correction du volume PostgreSQL 18+ (/var/lib/postgresql au lieu de /data)`
+
+---
+
+### Kestra — configuration storage obligatoire
+
+**Contexte :** En mode `server standalone`, Kestra exige une configuration explicite du backend de stockage des fichiers (logs, outputs). Sans cette configuration, le serveur démarre mais échoue à la première exécution de flow.
+
+**Symptôme :**
+```
+No bean of type [io.kestra.core.storages.StorageInterface] found
+```
+
+**Solution :** Ajouter le bloc `storage` dans `KESTRA_CONFIGURATION` :
+
+```yaml
+KESTRA_CONFIGURATION: |
+  kestra:
+    storage:
+      type: local
+      local:
+        base-path: /app/storage   # dossier monté en volume
+    repository:
+      type: postgres
+    queue:
+      type: postgres
+```
+
+Le dossier `/app/storage` est persisté via le volume `kestra_sports_data`.
+
+**Commit de correction :** `fix(docker): ajout effectif de la configuration storage locale Kestra`
+
+---
+
+### DuckDB — ORDER BY dans UNION ALL
+
+**Contexte :** DuckDB interdit `ORDER BY` directement dans un bras de `UNION ALL`. Nécessaire pour la table `gold.cost_summary` qui doit afficher les BU par ordre alphabétique avec la ligne TOTAL en dernier.
+
+**Solution :** Envelopper le `UNION ALL` dans un CTE intermédiaire :
+
+```sql
+WITH bu_data AS (...),
+totals AS (...),
+unioned AS (
+    SELECT * FROM bu_data
+    UNION ALL
+    SELECT * FROM totals
+)
+SELECT * FROM unioned
+ORDER BY CASE WHEN bu = 'TOTAL' THEN 1 ELSE 0 END, bu
+```
+
+---
+
+### argparse — options après sous-commande
+
+**Contexte :** Dans argparse, les options définies sur le parseur parent doivent apparaître **avant** le nom de la sous-commande. Mettre `--prime-rate` sur le parseur parent empêchait `python main.py run --prime-rate 0.08`.
+
+**Solution :** Déplacer `--prime-rate` et `--threshold` sur le sous-parseur `run` uniquement.
+
+**Commit de correction :** `fix(pipeline): correction argparse --prime-rate et --threshold après la sous-commande run`
+
+---
 
 ## Sécurité
 
