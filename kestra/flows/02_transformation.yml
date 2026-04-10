@@ -1,0 +1,178 @@
+# =============================================================================
+# Flow 02 — Transformation Silver
+# Nettoie, type et valide les données Bronze → Silver (DuckDB).
+# Ce flow doit être exécuté APRÈS le flow 01-ingestion.
+# =============================================================================
+
+id: 02-transformation
+namespace: poc.avantages.sportifs
+description: |
+  Transformation Silver — Nettoie et type les données Bronze : employees, sports_activities,
+  distances (avec validation cohérence), strava_activities. Produit des tables Silver
+  prêtes pour les calculs métier.
+
+variables:
+  db_path: "/app/data/sports_poc.duckdb"
+  project_root: "/app"
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Tâche 1 : Nettoyage RH → silver.employees
+  # ---------------------------------------------------------------------------
+  - id: clean_rh
+    type: io.kestra.plugin.scripts.python.Script
+    description: Nettoie bronze.rh_raw → silver.employees (types, flag sportif, trim)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.transformation.clean_rh import clean_rh_to_silver
+      n = clean_rh_to_silver("{{ vars.db_path }}")
+      print(f"silver.employees : {n} lignes")
+
+  # Test post-tâche : 161 lignes, pas de null sur les champs critiques
+  - id: test_employees
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] silver.employees : 161 lignes, pas de null id/nom/salaire"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM silver.employees").fetchone()[0]
+      nulls = conn.execute(
+        "SELECT COUNT(*) FROM silver.employees WHERE id_salarie IS NULL OR nom IS NULL OR salaire_brut IS NULL"
+      ).fetchone()[0]
+      sportifs = conn.execute(
+        "SELECT COUNT(*) FROM silver.employees WHERE is_sportif_deplacement = TRUE"
+      ).fetchone()[0]
+      conn.close()
+      assert count == 161, f"[FAIL] silver.employees : attendu 161, obtenu {count}"
+      assert nulls == 0, f"[FAIL] silver.employees : {nulls} valeur(s) null critique(s)"
+      assert sportifs == 68, f"[FAIL] silver.employees : attendu 68 sportifs, obtenu {sportifs}"
+      print(f"[PASS] silver.employees : {count} lignes, {sportifs} sportifs — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 2 : Nettoyage sports → silver.sports_activities
+  # ---------------------------------------------------------------------------
+  - id: clean_sports
+    type: io.kestra.plugin.scripts.python.Script
+    description: Corrige bronze.sports_raw → silver.sports_activities (Runing→Running, flag has_sport)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.transformation.clean_sports import clean_sports_to_silver
+      n = clean_sports_to_silver("{{ vars.db_path }}")
+      print(f"silver.sports_activities : {n} lignes")
+
+  # Test post-tâche : 161 lignes, plus de 'Runing', 95 sportifs avec has_sport=TRUE
+  - id: test_sports_activities
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] silver.sports_activities : correction typo Runing, 95 sportifs"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM silver.sports_activities").fetchone()[0]
+      runing = conn.execute(
+        "SELECT COUNT(*) FROM silver.sports_activities WHERE pratique_d_un_sport = 'Runing'"
+      ).fetchone()[0]
+      has_sport = conn.execute(
+        "SELECT COUNT(*) FROM silver.sports_activities WHERE has_sport = TRUE"
+      ).fetchone()[0]
+      conn.close()
+      assert count == 161, f"[FAIL] sports_activities : attendu 161, obtenu {count}"
+      assert runing == 0, f"[FAIL] sports_activities : {runing} 'Runing' non corrigé(s)"
+      assert has_sport == 95, f"[FAIL] sports_activities : attendu 95 sportifs, obtenu {has_sport}"
+      print(f"[PASS] silver.sports_activities : {count} lignes, 0 'Runing', {has_sport} sportifs — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 3 : Validation distances → silver.distances
+  # (dépend de silver.employees — doit s'exécuter après clean_rh)
+  # ---------------------------------------------------------------------------
+  - id: validate_distances
+    type: io.kestra.plugin.scripts.python.Script
+    description: Valide bronze.distances_raw → silver.distances (seuils 15km marche, 25km vélo)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.transformation.validate_distances import validate_distances_to_silver
+      n = validate_distances_to_silver("{{ vars.db_path }}")
+      print(f"silver.distances : {n} lignes")
+
+  # Test post-tâche : 68 lignes, colonnes is_valid et anomaly_reason cohérentes
+  - id: test_distances
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] silver.distances : 68 lignes, cohérence is_valid/anomaly_reason"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM silver.distances").fetchone()[0]
+      bad_valid = conn.execute(
+        "SELECT COUNT(*) FROM silver.distances WHERE is_valid = TRUE AND anomaly_reason IS NOT NULL"
+      ).fetchone()[0]
+      bad_invalid = conn.execute(
+        "SELECT COUNT(*) FROM silver.distances WHERE is_valid = FALSE AND anomaly_reason IS NULL"
+      ).fetchone()[0]
+      conn.close()
+      assert count == 68, f"[FAIL] silver.distances : attendu 68, obtenu {count}"
+      assert bad_valid == 0, f"[FAIL] silver.distances : {bad_valid} valide(s) avec raison anomalie"
+      assert bad_invalid == 0, f"[FAIL] silver.distances : {bad_invalid} invalide(s) sans raison"
+      print(f"[PASS] silver.distances : {count} lignes, cohérence is_valid OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 4 : Nettoyage Strava → silver.strava_activities
+  # ---------------------------------------------------------------------------
+  - id: clean_strava
+    type: io.kestra.plugin.scripts.python.Script
+    description: Normalise bronze.strava_raw → silver.strava_activities (distance_km, duree_minutes)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.transformation.clean_strava import clean_strava_to_silver
+      n = clean_strava_to_silver("{{ vars.db_path }}")
+      print(f"silver.strava_activities : {n} lignes")
+
+  # Test post-tâche : même nombre que bronze.strava_raw, distance_km cohérente
+  - id: test_strava_activities
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] silver.strava_activities : cohérence lignes et calculs distance/durée"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      bronze_count = conn.execute("SELECT COUNT(*) FROM bronze.strava_raw").fetchone()[0]
+      silver_count = conn.execute("SELECT COUNT(*) FROM silver.strava_activities").fetchone()[0]
+      bad_dist = conn.execute(
+        """
+        SELECT COUNT(*) FROM silver.strava_activities
+        WHERE distance_m IS NOT NULL
+          AND ABS(distance_km - CAST(distance_m AS DOUBLE) / 1000.0) > 0.001
+        """
+      ).fetchone()[0]
+      conn.close()
+      assert silver_count == bronze_count, (
+        f"[FAIL] strava_activities : Bronze={bronze_count}, Silver={silver_count}"
+      )
+      assert bad_dist == 0, f"[FAIL] strava_activities : {bad_dist} distance_km incohérente(s)"
+      print(f"[PASS] silver.strava_activities : {silver_count} lignes, distance_km OK")
