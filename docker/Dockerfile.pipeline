@@ -1,0 +1,37 @@
+# =============================================================================
+# Dockerfile — Pipeline POC Avantages Sportifs
+# Image légère Python 3.11 pour exécuter le pipeline Bronze → Silver → Gold.
+#
+# Usage :
+#   docker build -f docker/Dockerfile.pipeline -t poc-pipeline .
+#   docker run --rm -v $(pwd)/data:/app/data -v $(pwd)/input:/app/input poc-pipeline run
+#   docker run --rm -v $(pwd)/data:/app/data -v $(pwd)/input:/app/input poc-pipeline status
+# =============================================================================
+
+FROM python:3.11-slim
+
+# Métadonnées
+LABEL maintainer="POC Avantages Sportifs"
+LABEL description="Pipeline ETL Bronze → Silver → Gold"
+
+# Répertoire de travail
+WORKDIR /app
+
+# Installer les dépendances Python (layer mis en cache si requirements.txt inchangé)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copier le code source
+COPY src/ ./src/
+COPY main.py .
+
+# Créer les répertoires attendus par le pipeline
+RUN mkdir -p /app/data /app/input
+
+# Variables d'environnement par défaut (surchargeable via --env-file ou -e)
+ENV DUCKDB_PATH=/app/data/sports_poc.duckdb
+ENV PYTHONUNBUFFERED=1
+
+# Point d'entrée : python main.py <commande>
+ENTRYPOINT ["python", "main.py"]
+CMD ["run"]
