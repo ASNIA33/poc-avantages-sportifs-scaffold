@@ -1,78 +1,84 @@
 # Architecture technique — POC Avantages Sportifs
 
+*Documentation technique détaillée du pipeline Bronze → Silver → Gold.*
+*Pour la documentation utilisateur, voir le [README](../README.md).*
+
+---
+
 ## Table des matières
 
-- [Vue d'ensemble](#vue-densemble)
-- [Flux de données](#flux-de-données)
-- [Choix techniques détaillés](#choix-techniques-détaillés)
-- [Couche Bronze — Ingestion](#couche-bronze--ingestion)
-- [Tests](#tests)
-- [Couche Silver — Transformation](#couche-silver--transformation)
-- [Couche Gold — Calculs métier](#couche-gold--calculs-métier)
-- [Docker — Images et déploiement](#docker--images-et-déploiement)
-- [Couche Notifications — Slack](#couche-notifications--slack)
-- [Flows Kestra — Orchestration](#flows-kestra--orchestration)
-- [CLI local — main.py](#cli-local--mainpy)
-- [Problèmes rencontrés et solutions](#problèmes-rencontrés-et-solutions)
-- [Sécurité](#sécurité)
+- 1. [Vue d'ensemble](#vue-densemble)
+  - 1.1 [Principes directeurs](#principes-directeurs)
+  - 1.2 [Flux de données global](#flux-de-données-global)
+- 2. [Choix techniques](#choix-techniques)
+  - 2.1 [DuckDB](#duckdb--base-de-données-analytique)
+  - 2.2 [Kestra](#kestra--orchestration)
+  - 2.3 [Metabase](#metabase--visualisation)
+  - 2.4 [Docker Compose](#docker-compose--infrastructure)
+- 3. [Couche Bronze — Ingestion](#couche-bronze--ingestion)
+- 4. [Couche Silver — Transformation](#couche-silver--transformation)
+- 5. [Couche Gold — Calculs métier](#couche-gold--calculs-métier)
+- 6. [Couche Notifications — Slack](#couche-notifications--slack)
+- 7. [Flows Kestra — Orchestration](#flows-kestra--orchestration)
+- 8. [CLI local — main.py](#cli-local--mainpy)
+- 9. [Tests — Stratégie à 3 niveaux](#tests--stratégie-à-3-niveaux)
+- 10. [Docker — Images et déploiement](#docker--images-et-déploiement)
+- 11. [Problèmes rencontrés et solutions](#problèmes-rencontrés-et-solutions)
+- 12. [Sécurité](#sécurité)
 
 ---
 
 ## Vue d'ensemble
 
-Ce document détaille les choix d'architecture pour le POC Avantages Sportifs de Sport Data Solution.
-
-## Principes directeurs
+### Principes directeurs
 
 1. **Simplicité** : ne pas empiler les technologies, choisir des outils multi-fonctions
 2. **Maintenabilité** : code modulaire, tests à chaque niveau, documentation vivante
 3. **Scalabilité** : chaque composant a un chemin de montée en charge identifié
 4. **Sécurité** : données RH sensibles, accès contrôlé, pas d'exposition publique
 
-## Flux de données
-
-### Pipeline global — Sources → Bronze → Silver → Gold → Restitution
+### Flux de données global
 
 ```mermaid
 flowchart TD
     subgraph Sources["📥 Sources de données"]
-        RH["Donnees_RH.xlsx\n161 salariés"]
-        SP["Donnees_Sportive.xlsx\n161 lignes sport"]
-        GM["API Google Maps\nDistances domicile-bureau"]
-        ST["Simulation Strava\nActivités 12 mois"]
+        RH["Donnees_RH.xlsx\n161 salariés · 11 colonnes"]
+        SP["Donnees_Sportive.xlsx\n161 lignes · sport déclaré"]
+        GM["API Google Maps\nou haversine (sans clé)"]
+        ST["Simulation Strava\nactivités 12 mois glissants"]
     end
 
-    subgraph Ingestion["⚙️ Ingestion Python — src/ingestion/"]
+    subgraph Ingestion["⚙️ src/ingestion/"]
         LE["load_excel.py\nload_rh_to_bronze()\nload_sports_to_bronze()"]
-        FD["fetch_distances.py\nfetch_distances()"]
+        FD["fetch_distances.py\nfetch_distances_to_bronze()"]
         GS["generate_strava.py\ngenerate_strava_data()"]
     end
 
-    subgraph Bronze["🟫 BRONZE — schéma bronze (DuckDB)"]
+    subgraph Bronze["🟫 BRONZE — Données brutes (schéma bronze)"]
         BR["bronze.rh_raw"]
         BS["bronze.sports_raw"]
         BD["bronze.distances_raw"]
         BT["bronze.strava_raw"]
     end
 
-    subgraph Silver["🥈 SILVER — schéma silver (DuckDB)"]
+    subgraph Silver["🥈 SILVER — Nettoyé + Typé + SODA (schéma silver)"]
         SE["silver.employees"]
         SSA["silver.sports_activities"]
         SD["silver.distances"]
         STA["silver.strava_activities"]
     end
 
-    subgraph Gold["🥇 GOLD — schéma gold (DuckDB)"]
-        GP["gold.prime_eligibility\nÉligibilité prime 5%"]
-        GW["gold.wellbeing_eligibility\nÉligibilité jours bien-être"]
-        GC["gold.cost_summary\nCoûts par BU"]
-        GA["gold.distance_anomalies\nDéclarations incohérentes"]
-        GL["gold.activity_leaderboard\nClassement activités"]
+    subgraph Gold["🥇 GOLD — KPI Métier (schéma gold)"]
+        GP["gold.prime_eligibility"]
+        GW["gold.wellbeing_eligibility"]
+        GC["gold.cost_summary"]
+        GA["gold.distance_anomalies"]
+        GL["gold.activity_leaderboard"]
     end
 
     subgraph Restitution["📤 Restitution"]
-        MB["Metabase\nDashboards KPI\nport 3000"]
-        SL["Slack\nNotifications"]
+        MB["Metabase\nDashboards KPI · :3000"]
+        SL["Slack\nNotifications salariés"]
         AL["Alertes\nAnomalies distance"]
     end
 
@@ -97,475 +103,354 @@ flowchart TD
     GA --> AL
 ```
 
-### Flux de tests — SODA + pytest + Kestra
+[↑ Retour au sommaire](#table-des-matières)
 
-```mermaid
-flowchart LR
-    subgraph Kestra["⚙️ Tests Kestra (par tâche)"]
-        K1["Vérif. bronze.rh_raw\n= 161 lignes"]
-        K2["Vérif. bronze.sports_raw\n= 161 lignes"]
-        K3["Vérif. silver.employees\nno null, unicité"]
-        K4["Vérif. gold.prime_eligibility\n> 0 éligibles"]
-    end
+---
 
-    subgraph SODA["🔍 Tests SODA (couche Silver)"]
-        S1["Distances ≥ 0"]
-        S2["Dates valides\net logiques"]
-        S3["Unicité id_salarie"]
-        S4["Salaires 25k–80k €"]
-        S5["Pas de nulls\nchamps critiques"]
-    end
+## Choix techniques
 
-    subgraph Pytest["🧪 Tests pytest (src/tests/)"]
-        subgraph Ing["test_ingestion.py"]
-            P1["RH : 161 lignes\nsnake_case · no null id\n_ingested_at présent"]
-            P2["Sports : 161 lignes\nno null id_salarie"]
-            P3["Strava : >1000 lignes\ncolonnes · dates · distances\nno null · uniquement sportifs"]
-        end
-        subgraph Trans["test_transformation.py"]
-            P4["Nettoyage Running\nRuning → Running"]
-            P5["Distances validées\nmax 15km marche"]
-        end
-        subgraph Bus["test_business.py"]
-            P6["Prime = salaire × 0.05"]
-            P7["Seuil 14/15/16 activités"]
-        end
-        subgraph Notif["test_notifications.py"]
-            P8["Format message Slack"]
-        end
-    end
-
-    Bronze["🟫 BRONZE"] -->|after ingestion| Kestra
-    Silver["🥈 SILVER"] -->|after transformation| SODA
-    Bronze -->|unit tests| Pytest
-    Silver -->|unit tests| Pytest
-    Gold["🥇 GOLD"] -->|unit tests| Pytest
-    Gold -->|after business| Kestra
-```
-
-## Choix techniques détaillés
-
-### DuckDB — Base de données
+### DuckDB — Base de données analytique
 
 **Pourquoi DuckDB plutôt que PostgreSQL ou SQLite :**
-- Moteur analytique (OLAP) optimisé pour les requêtes agrégées — parfait pour les KPI
-- Zéro serveur : fichier unique, embarqué dans le process Python
-- Lecture native des fichiers Excel, CSV, Parquet sans ETL externe
-- SQL standard complet (window functions, CTEs, etc.)
-- Organisation en schémas (bronze/silver/gold) dans un seul fichier
-- Évolution naturelle vers MotherDuck (DuckDB cloud) sans changer le SQL
+
+| Critère | DuckDB | PostgreSQL | SQLite |
+|---------|--------|------------|--------|
+| Zéro serveur | ✅ | ❌ | ✅ |
+| Moteur OLAP (agrégations) | ✅ | Partiel | ❌ |
+| Schemas multiples (bronze/silver/gold) | ✅ | ✅ | ❌ |
+| Lecture native Excel/Parquet | ✅ | ❌ | ❌ |
+| Window functions (RANK, LAG) | ✅ | ✅ | Partiel |
+| Evolution cloud | MotherDuck | RDS | — |
+
+**Décisions d'implémentation :**
+- `CREATE OR REPLACE TABLE` — idempotent, relançable à tout moment
+- Schémas séparés (`bronze`, `silver`, `gold`) dans un seul fichier `.duckdb`
+- `db_session()` : context manager Python pour garantir la fermeture de connexion
 
 ### Kestra — Orchestration
 
 **Pourquoi Kestra plutôt qu'Airflow ou Prefect :**
-- Un seul outil pour : orchestration, scheduling, monitoring, logs, alertes
+- Un seul outil pour : orchestration, scheduling, monitoring, logs, alertes, retry
 - Flows déclarés en YAML (pas de code Python pour l'orchestration)
-- UI web native pour la supervision et la démo live
-- Variables d'environnement intégrées (paramètres dynamiques)
-- Léger en ressources, démarrage rapide
-- Pas besoin d'un outil de monitoring séparé
+- UI web native pour la supervision et la démo live (localhost:8082)
+- Variables d'environnement intégrées (`{{ vars.prime_rate }}`)
+- Léger en ressources, démarrage rapide sans workers séparés
+- `transmitFailed: false` sur les notifications → un échec Slack ne stoppe pas le pipeline
 
 ### Metabase — Visualisation
 
 **Pourquoi Metabase plutôt que PowerBI ou Tableau :**
 - Open-source, conteneurisable, pas de licence
-- Connecteur DuckDB disponible (driver communautaire)
-- Rafraîchissement automatique des données
+- Driver DuckDB communautaire (JAR v1.5.1.0 intégré dans l'image Docker)
+- Rafraîchissement automatique des requêtes après chaque run pipeline
 - Démo live accessible via navigateur (localhost:3000)
 - Alternative crédible en entreprise
 
 ### Docker Compose — Infrastructure
 
-**Configuration des ports (évitement de conflits) :**
-- Kestra UI : 8082 (interne 8080)
-- Kestra API : 8083 (interne 8081)
-- PostgreSQL Kestra : 5433 (interne 5432)
-- Metabase : 3000
+**Ports configurés (évitement de conflits avec d'autres services locaux) :**
+
+| Service | Port interne | Port exposé | Raison |
+|---------|-------------|-------------|--------|
+| Kestra UI | 8080 | **8082** | Évite conflit avec d'autres Kestra |
+| Kestra API | 8081 | **8083** | — |
+| PostgreSQL | 5432 | **5433** | Évite conflit avec PostgreSQL local |
+| Metabase | 3000 | **3000** | Standard |
+
+[↑ Retour au sommaire](#table-des-matières)
+
+---
 
 ## Couche Bronze — Ingestion
 
 ### Module `src/ingestion/load_excel.py`
 
-Deux fonctions principales, toutes deux basées sur `db_session` (gestionnaire de contexte DuckDB) :
-
-| Fonction | Source | Table cible |
-|----------|--------|-------------|
-| `load_rh_to_bronze()` | `input/Donnees_RH.xlsx` | `bronze.rh_raw` |
-| `load_sports_to_bronze()` | `input/Donnees_Sportive.xlsx` | `bronze.sports_raw` |
+```mermaid
+flowchart LR
+    EX1["Donnees_RH.xlsx"] --> N1["Normalisation colonnes\nunicode NFD · lower · [^a-z0-9_]→_"] --> I1["bronze.rh_raw\n161 lignes · _ingested_at UTC"]
+    EX2["Donnees_Sportive.xlsx"] --> N2["Même normalisation"] --> I2["bronze.sports_raw\n161 lignes · _ingested_at UTC"]
+```
 
 **Normalisation des colonnes :**
-- Suppression des accents via `unicodedata.normalize("NFD")`
-- Conversion en minuscules
-- Remplacement des caractères non alphanumériques par `_`
-- Exemples : `ID salarié` → `id_salarie`, `Prénom` → `prenom`, `Date d'embauche` → `date_d_embauche`
 
-**Colonne technique ajoutée :** `_ingested_at` (timestamp UTC) sur chaque ligne.
+| Colonne source | Colonne normalisée |
+|---------------|-------------------|
+| `ID salarié` | `id_salarie` |
+| `Prénom` | `prenom` |
+| `Date d'embauche` | `date_d_embauche` |
+| `Salaire Brut` | `salaire_brut` |
 
-**Création des tables :** `CREATE OR REPLACE TABLE` — idempotent, relançable sans effet de bord.
+**Principes :**
+- `unicodedata.normalize("NFD")` pour supprimer les accents
+- `re.sub(r"[^a-z0-9_]", "_", ...)` pour les caractères spéciaux
+- `_ingested_at` : timestamp UTC ajouté sur chaque ligne
+- `CREATE OR REPLACE TABLE` : idempotent
 
-## Tests
+### Module `src/ingestion/fetch_distances.py`
 
-### Stratégie à 3 niveaux
+Calcule la distance domicile-bureau pour les 68 salariés avec mode sportif.
 
-| Niveau | Outil | Cible | Exemple |
-|--------|-------|-------|---------|
-| Tâche Kestra | Assertions dans le flow | Chaque tâche produit un résultat | `bronze.rh_raw` contient 161 lignes |
-| Qualité données | SODA Core | Couche Silver | Distance ≥ 0, dates valides |
-| Unitaire | pytest | Fonctions Python | Calcul prime = salaire × 0.05 |
+**Deux modes :**
 
-### Tests implémentés — Ingestion Bronze (`src/tests/test_ingestion.py`)
+| Mode | Condition | Précision | Coût |
+|------|-----------|-----------|------|
+| **Haversine** | `GOOGLE_MAPS_API_KEY` absent | Approximatif (vol d'oiseau) | Gratuit |
+| **Google Maps Distance Matrix** | Clé API configurée | Réel (routier/piéton/vélo) | Payant après free tier |
 
-**RH & Sportif (Excel → Bronze)**
+Adresse de référence : `1362 Avenue des Platanes, 34970 Lattes`
 
-| Test | Table | Vérification |
-|---|---|---|
-| `test_load_rh_row_count` | `bronze.rh_raw` | Exactement 161 lignes |
-| `test_load_rh_columns_snake_case` | `bronze.rh_raw` | Colonnes `[a-z0-9_]+` uniquement |
-| `test_load_rh_no_null_id` | `bronze.rh_raw` | Aucun `id_salarie` null |
-| `test_load_rh_has_ingested_at` | `bronze.rh_raw` | `_ingested_at` présent et non null |
-| `test_load_sports_row_count` | `bronze.sports_raw` | Exactement 161 lignes |
-| `test_load_sports_no_null_id` | `bronze.sports_raw` | Aucun `id_salarie` null |
+**Modes de déplacement mappés :**
+- `'Marche/running'` → `walking` (Google Maps)
+- `'Vélo/Trottinette/Autres'` → `bicycling`
 
-**Simulation Strava (génération → Bronze)**
+### Module `src/ingestion/generate_strava.py`
 
-| Test | Table | Vérification |
-|---|---|---|
-| `test_strava_generation_row_count` | `bronze.strava_raw` | > 1 000 lignes |
-| `test_strava_columns` | `bronze.strava_raw` | 7 colonnes exactes |
-| `test_strava_no_null_required` | `bronze.strava_raw` | `id_salarie`, `date_debut`, `sport_type` non nuls |
-| `test_strava_distance_positive` | `bronze.strava_raw` | `distance_m` > 0 quand non nulle |
-| `test_strava_duration_positive` | `bronze.strava_raw` | `temps_ecoule_s` > 0 |
-| `test_strava_date_range` | `bronze.strava_raw` | Toutes les dates dans les 12 derniers mois |
-| `test_strava_only_sportifs` | `bronze.strava_raw` | Uniquement des salariés avec sport déclaré |
+Génère une simulation réaliste d'activités sportives sur les 12 mois glissants :
+- Uniquement pour les 68 salariés avec mode sportif (`is_sportif_deplacement = TRUE`)
+- Sport aléatoire pondéré (Running, Cycling, Yoga, Tennis...)
+- Distance et durée cohérentes avec le sport
+- Date de début uniformément distribuée sur 365 jours
 
-**Distances domicile-bureau (haversine/API → Bronze)**
+[↑ Retour au sommaire](#table-des-matières)
 
-| Test | Table | Vérification |
-|---|---|---|
-| `test_distances_row_count` | `bronze.distances_raw` | Exactement 68 lignes (sportifs) |
-| `test_distances_columns` | `bronze.distances_raw` | 5 colonnes exactes |
-| `test_distances_positive` | `bronze.distances_raw` | Toutes distances > 0 km |
-| `test_distances_mode_coherent` | `bronze.distances_raw` | Marche → walking, Vélo → bicycling |
-| `test_distances_no_null` | `bronze.distances_raw` | `id_salarie` et `distance_km` non nuls |
-| `test_haversine_lattes` | _(unitaire)_ | Lattes → distance < 5 km |
-| `test_haversine_nimes` | _(unitaire)_ | Nîmes → distance > 30 km |
-
-Chaque test utilise une DB temporaire (`/tmp/test_ingestion.duckdb`) nettoyée avant et après exécution.
-Le mode simulation haversine est utilisé en test (pas d'appel API réelle).
-
-### Tests implémentés — Transformation Silver (`src/tests/test_transformation.py`)
-
-Fixture `scope="module"` : Bronze chargé une fois, une distance anomalique injectée (walking 20 km > seuil 15 km), puis toutes les transformations Silver exécutées.
-
-**silver.employees**
-
-| Test | Vérification |
-|---|---|
-| `test_employees_row_count` | 161 lignes |
-| `test_employees_is_sportif` | 68 salariés avec `is_sportif_deplacement = TRUE` |
-| `test_employees_no_null_critical` | `id_salarie`, `nom`, `prenom`, `salaire_brut` non nuls |
-| `test_employees_salary_range` | Salaires entre 20 000 et 100 000 € |
-| `test_employees_has_transformed_at` | `_transformed_at` présente et non nulle |
-
-**silver.sports_activities**
-
-| Test | Vérification |
-|---|---|
-| `test_sports_row_count` | 161 lignes |
-| `test_sports_no_runing` | Aucune valeur `'Runing'` (corrigée en `'Running'`) |
-| `test_sports_has_sport_flag` | 95 salariés avec `has_sport = TRUE` |
-
-**silver.distances**
-
-| Test | Vérification |
-|---|---|
-| `test_distances_row_count` | 68 lignes |
-| `test_distances_anomaly_detection` | ≥ 1 anomalie (`is_valid = FALSE`) |
-| `test_distances_valid_have_no_reason` | `anomaly_reason` NULL quand `is_valid = TRUE` |
-| `test_distances_invalid_have_reason` | `anomaly_reason` non NULL quand `is_valid = FALSE` |
-
-**silver.strava_activities**
-
-| Test | Vérification |
-|---|---|
-| `test_strava_row_count` | Même nombre que `bronze.strava_raw` |
-| `test_strava_distance_km` | `distance_km = distance_m / 1000` (tolérance 0.001) |
-| `test_strava_duree_minutes` | `duree_minutes = temps_ecoule_s / 60` (tolérance 0.01) |
-| `test_strava_no_null_required` | `id_salarie`, `date_debut`, `sport_type` non nuls |
+---
 
 ## Couche Silver — Transformation
 
-### Modules `src/transformation/`
+### Flux de transformation
 
-| Module | Fonction | Bronze → Silver |
-|---|---|---|
-| `clean_rh.py` | `clean_rh_to_silver()` | `rh_raw` → `employees` |
-| `clean_sports.py` | `clean_sports_to_silver()` | `sports_raw` → `sports_activities` |
-| `validate_distances.py` | `validate_distances_to_silver()` | `distances_raw` + `employees` → `distances` |
-| `clean_strava.py` | `clean_strava_to_silver()` | `strava_raw` → `strava_activities` |
-| `__init__.py` | `run_all_transformations()` | Orchestre les 4 modules dans l'ordre |
+```mermaid
+flowchart LR
+    subgraph Input["🟫 BRONZE"]
+        B1["rh_raw"]
+        B2["sports_raw"]
+        B3["distances_raw"]
+        B4["strava_raw"]
+    end
 
-**Transformations clés :**
+    subgraph Process["⚙️ src/transformation/"]
+        T1["clean_rh.py\nclean_rh_to_silver()"]
+        T2["clean_sports.py\nclean_sports_to_silver()"]
+        T3["validate_distances.py\nvalidate_distances_to_silver()"]
+        T4["clean_strava.py\nclean_strava_to_silver()"]
+    end
 
-- `silver.employees` : dates castées en DATE, salaires en INTEGER, flag `is_sportif_deplacement`, trim des champs texte
-- `silver.sports_activities` : correction "Runing" → "Running", flag `has_sport`
-- `silver.distances` : validation vs seuils config (`WALK_MAX_KM=15`, `BIKE_MAX_KM=25`), colonnes `is_valid` et `anomaly_reason`
-- `silver.strava_activities` : `distance_km = distance_m/1000`, `duree_minutes = temps_ecoule_s/60`
+    subgraph Output["🥈 SILVER"]
+        S1["employees\n161 lignes"]
+        S2["sports_activities\n161 lignes"]
+        S3["distances\n68 lignes"]
+        S4["strava_activities\n>1000 lignes"]
+    end
+
+    B1 --> T1 --> S1
+    B2 --> T2 --> S2
+    B3 & S1 --> T3 --> S3
+    B4 --> T4 --> S4
+```
+
+### Transformations détaillées
+
+**`silver.employees`** (`clean_rh_to_silver`) :
+- `date_naissance`, `date_embauche` → `DATE` (cast SQL)
+- `salaire_brut` → `INTEGER` (suppression virgules)
+- `is_sportif_deplacement = TRUE` si `moyen_deplacement` ∈ `{'Marche/running', 'Vélo/Trottinette/Autres'}`
+- `TRIM()` sur tous les champs texte
+- `_transformed_at` : timestamp UTC ajouté
+
+**`silver.sports_activities`** (`clean_sports_to_silver`) :
+- Correction coquille : `'Runing'` → `'Running'`
+- `has_sport = TRUE` si sport non nul et non `'Aucun'`
+
+**`silver.distances`** (`validate_distances_to_silver`) :
+- `is_valid = TRUE` si distance dans les seuils du mode :
+  - Marche/running : ≤ `WALK_MAX_DISTANCE_KM` (défaut : 15 km)
+  - Vélo/Trottinette : ≤ `BIKE_MAX_DISTANCE_KM` (défaut : 25 km)
+- `anomaly_reason` : message descriptif si `is_valid = FALSE`
+- Jointure avec `silver.employees` pour récupérer le mode de déplacement
+
+**`silver.strava_activities`** (`clean_strava_to_silver`) :
+- `distance_km = distance_m / 1000.0`
+- `duree_minutes = temps_ecoule_s / 60.0`
+- Filtre : uniquement les activités avec `date_debut` non nulle
+
+[↑ Retour au sommaire](#table-des-matières)
+
+---
 
 ## Couche Gold — Calculs métier
 
-### Modules `src/business/`
-
-| Module | Fonction(s) | Silver → Gold |
-|---|---|---|
-| `compute_prime.py` | `compute_prime_eligibility()` | `employees` + `distances` → `prime_eligibility` |
-| `compute_wellbeing.py` | `compute_wellbeing_eligibility()` | `employees` + `strava_activities` → `wellbeing_eligibility` |
-| `detect_anomalies.py` | `detect_distance_anomalies()` | `distances` + `employees` → `distance_anomalies` |
-| `build_summary.py` | `build_cost_summary()` + `build_activity_leaderboard()` | tables Gold → `cost_summary` + `activity_leaderboard` |
-| `__init__.py` | `run_all_business()` | Orchestre les 5 fonctions dans l'ordre |
-
-**Tables Gold produites :**
-
-| Table | Périmètre | Colonnes clés |
-|---|---|---|
-| `gold.prime_eligibility` | 68 sportifs | `is_eligible`, `prime_montant`, `reason_ineligible` |
-| `gold.wellbeing_eligibility` | 161 salariés | `activity_count`, `is_eligible`, `days_granted` |
-| `gold.distance_anomalies` | Anomalies only | `distance_km`, `max_distance_km`, `anomaly_reason` |
-| `gold.cost_summary` | 5 BU + TOTAL | `cout_prime_total`, `nb_wellbeing_eligible` |
-| `gold.activity_leaderboard` | 161 salariés | `activity_count`, `classement` |
-
-**Règles métier implémentées :**
-
-- **Prime sportive** : `prime_montant = salaire_brut × PRIME_RATE` (0 si non éligible) — taux paramétrable
-- **Jours bien-être** : `days_granted = 5` si `activity_count >= WELLBEING_THRESHOLD` — seuil paramétrable
-- **Anomalies** : distance > seuil mode → logue en WARNING + insère dans `gold.distance_anomalies`
-- **Résumé coûts** : agrégation par BU avec ligne TOTAL via `UNION ALL` dans une sous-requête
-- **Classement** : `RANK() OVER (ORDER BY activity_count DESC)` — ex-aequo gérés
-
-**Paramètres dynamiques (via `src/utils/config.py`) :**
-
-| Paramètre | Défaut | Description |
-|---|---|---|
-| `PRIME_RATE` | 0.05 | Taux de la prime (5%) |
-| `WELLBEING_THRESHOLD` | 15 | Seuil minimum d'activités |
-
-### Tests implémentés — Calculs métier Gold (`src/tests/test_business.py`)
-
-Fixture `scope="module"` : Bronze + anomalie injectée (walking 20 km) + Silver complet + Gold complet.
-
-**gold.prime_eligibility**
-
-| Test | Vérification |
-|---|---|
-| `test_prime_row_count` | 68 lignes (sportifs uniquement) |
-| `test_prime_has_ineligible` | ≥ 1 non éligible (anomalie injectée) |
-| `test_prime_eligible_have_nonzero_montant` | Éligibles ont prime_montant > 0 |
-| `test_prime_ineligible_have_zero_montant` | Non éligibles ont prime_montant = 0 |
-| `test_prime_calcul_taux_defaut` | prime_montant = salaire × 0.05 (tolérance 0.01) |
-| `test_prime_ineligible_have_reason` | reason_ineligible non nul si non éligible |
-| `test_prime_custom_rate` | Taux 10% → montants 2× supérieurs à 5% |
-
-**gold.wellbeing_eligibility**
-
-| Test | Vérification |
-|---|---|
-| `test_wellbeing_row_count` | 161 lignes (tous les salariés) |
-| `test_wellbeing_has_eligible` | ≥ 1 éligible |
-| `test_wellbeing_days_granted_binary` | days_granted ∈ {0, 5} uniquement |
-| `test_wellbeing_consistency_eligible_days` | Cohérence is_eligible ↔ days_granted |
-| `test_wellbeing_seuil_14_non_eligible` | Seuil 14 → éligibles ≥ seuil 15 |
-
-**gold.distance_anomalies**
-
-| Test | Vérification |
-|---|---|
-| `test_anomalies_has_at_least_one` | ≥ 1 anomalie détectée |
-| `test_anomalies_have_reason` | anomaly_reason non nul |
-| `test_anomalies_distance_exceeds_max` | distance_km > max_distance_km |
-
-**gold.cost_summary**
-
-| Test | Vérification |
-|---|---|
-| `test_cost_summary_row_count` | 6 lignes (5 BU + TOTAL) |
-| `test_cost_summary_has_total_row` | Ligne 'TOTAL' présente |
-| `test_cost_summary_total_coherent` | TOTAL.nb_total_salaries = 161 |
-| `test_cost_summary_bu_names` | 5 BU : Finance, Marketing, R&D, Support, Ventes |
-
-**gold.activity_leaderboard**
-
-| Test | Vérification |
-|---|---|
-| `test_leaderboard_row_count` | 161 lignes |
-| `test_leaderboard_classement_starts_at_one` | MIN(classement) = 1 |
-| `test_leaderboard_non_sportifs_have_zero_activities` | Cohérence classement / activités |
-
-## Docker — Images et déploiement
-
-### Dockerfiles
-
-| Fichier | Base | Rôle |
-|---|---|---|
-| `docker/Dockerfile.pipeline` | `python:3.11-slim` | Image pipeline ETL (Bronze→Silver→Gold) |
-| `docker/metabase/Dockerfile.metabase` | `metabase/metabase:latest` + `debian:12-slim` | Metabase + driver DuckDB v1.5.1.0 |
-
-**`docker/Dockerfile.pipeline`** — Image légère pour exécuter le pipeline :
-- Installe les dépendances `requirements.txt` (sans cache pip)
-- Copie `src/` et `main.py`
-- `ENTRYPOINT ["python", "main.py"]`, `CMD ["run"]`
-- Variables : `DUCKDB_PATH`, `PYTHONUNBUFFERED=1`
-
-**`docker/metabase/Dockerfile.metabase`** — Build multi-étapes :
-1. Stage `downloader` (debian:12-slim) : télécharge le JAR DuckDB driver v1.5.1.0 via `curl`
-2. Stage final (metabase:latest) : copie le JAR dans `/plugins/`, `MB_PLUGINS_DIR=/plugins`
-
-### Docker Compose — Services, ports et volumes
+### Flux de calcul
 
 ```mermaid
-graph TD
-    subgraph Compose["docker-compose.yml"]
-        subgraph Services["Services"]
-            PG["postgres-sports\nImage: postgres:18\nPort: 5433→5432\nVolume: /var/lib/postgresql\nfix PostgreSQL 18+"]
-            KE["kestra-sports\nImage: kestra/kestra:latest\nPort: 8082→8080\nPort: 8083→8081\nstorage.type: local"]
-            MB["metabase-sports\nBuild: Dockerfile.metabase\nPort: 3000→3000\nDriver DuckDB v1.5.1.0"]
-            PP["pipeline-sports\nBuild: Dockerfile.pipeline\nProfil: run\none-shot ETL"]
-        end
-
-        subgraph Volumes["Volumes"]
-            VDB["./data\nfichier sports_poc.duckdb\nKestra + Metabase + Pipeline"]
-            VPG["postgres_sports_data\n/var/lib/postgresql\nfix: pas de /data"]
-            VKE["kestra_sports_data\n/app/storage\nstockage local Kestra"]
-            VIN["./input\nfichiers Excel source"]
-        end
+flowchart LR
+    subgraph Silver["🥈 SILVER"]
+        S1["employees"]
+        S2["distances"]
+        S3["strava_activities"]
     end
 
-    PG -- "données persistantes" --> VPG
-    KE -- "données persistantes" --> VKE
-    KE & MB & PP -- "DuckDB partagé" --> VDB
-    PP -- "fichiers Excel" --> VIN
-    PG -.->|"backend metadata"| KE
-    KE -.->|"depends_on"| MB
-    KE -.->|"depends_on"| PP
+    subgraph Business["⚙️ src/business/"]
+        C1["compute_prime.py"]
+        C2["compute_wellbeing.py"]
+        C3["detect_anomalies.py"]
+        C4["build_summary.py"]
+    end
+
+    subgraph Gold["🥇 GOLD"]
+        G1["prime_eligibility\n68 lignes"]
+        G2["wellbeing_eligibility\n161 lignes"]
+        G3["distance_anomalies\nvariable"]
+        G4["cost_summary\n6 lignes"]
+        G5["activity_leaderboard\n161 lignes"]
+    end
+
+    S1 & S2 --> C1 --> G1
+    S1 & S3 --> C2 --> G2
+    S2 --> C3 --> G3
+    G1 & G2 --> C4 --> G4
+    S3 --> C4 --> G5
 ```
 
-**Corrections appliquées dans `docker-compose.yml` :**
+### Tables Gold — structure et règles
 
-| Problème | Ancienne valeur | Valeur corrigée |
-|---|---|---|
-| PostgreSQL 18+ volume | `/var/lib/postgresql/data` | `/var/lib/postgresql` |
-| Kestra storage config | absent | `storage.type: local`, `base-path: /app/storage` |
+**`gold.prime_eligibility`** — `compute_prime_eligibility()` :
 
-**Profil Docker `run`** : le service `pipeline-sports` ne démarre que si le profil est activé :
+| Colonne | Type | Règle |
+|---------|------|-------|
+| `id_salarie` | VARCHAR | Clé — 68 sportifs uniquement |
+| `is_eligible` | BOOLEAN | `= silver.distances.is_valid` |
+| `prime_montant` | DOUBLE | `salaire_brut × PRIME_RATE` si éligible, sinon `0` |
+| `reason_ineligible` | VARCHAR | `anomaly_reason` copié si `is_valid = FALSE` |
 
-```bash
-docker-compose build                               # construit les images
-docker-compose up -d                               # démarre infra (sans pipeline)
-docker-compose run --rm pipeline-sports run        # pipeline one-shot
-docker-compose run --rm pipeline-sports status     # statut des tables
-```
+**`gold.wellbeing_eligibility`** — `compute_wellbeing_eligibility()` :
 
-### Scripts de démarrage
+| Colonne | Type | Règle |
+|---------|------|-------|
+| `id_salarie` | VARCHAR | Clé — 161 salariés (LEFT JOIN) |
+| `activity_count` | INTEGER | `COUNT(strava_activities)` |
+| `is_eligible` | BOOLEAN | `activity_count >= WELLBEING_THRESHOLD` |
+| `days_granted` | INTEGER | `5` si éligible, sinon `0` |
 
-| Script | Rôle |
-|---|---|
-| `scripts/start.sh` | Démarre l'infra, attend Metabase, lance le pipeline, affiche les URLs |
-| `scripts/demo.sh` | Injecte une activité fictive, recalcule Gold, envoie la notification Slack |
+**`gold.cost_summary`** — `build_cost_summary()` :
+- Agrégation par BU : `SUM(prime_montant)`, `COUNT(*)` éligibles prime, `COUNT(*)` éligibles bien-être
+- Ligne `TOTAL` via `UNION ALL` dans un CTE `unioned` (contournement limitation DuckDB ORDER BY)
+- `ORDER BY CASE WHEN bu = 'TOTAL' THEN 1 ELSE 0 END, bu`
 
-```bash
-chmod +x scripts/start.sh scripts/demo.sh
-./scripts/start.sh    # Démarrage complet
-./scripts/demo.sh     # Démo live
-```
+**`gold.activity_leaderboard`** — `build_activity_leaderboard()` :
+- `RANK() OVER (ORDER BY activity_count DESC)` — ex-aequo gérés
+- Jointure `silver.employees` + `silver.strava_activities` COUNT
+
+[↑ Retour au sommaire](#table-des-matières)
+
+---
 
 ## Couche Notifications — Slack
 
 ### Module `src/notifications/slack_messenger.py`
 
 | Fonction | Description |
-|---|---|
-| `format_activity_message()` | Génère un message Slack motivant (templates variés, hash MD5 déterministe) |
-| `send_slack_message()` | POST webhook Slack ou dry-run si `SLACK_WEBHOOK_URL` absent |
-| `notify_recent_activities()` | Notifie toutes les activités dans une fenêtre temporelle (défaut 24h) |
-| `notify_single_activity()` | Notifie une activité spécifique par ID (démo live) |
+|----------|-------------|
+| `format_activity_message()` | Génère un message Slack motivant |
+| `send_slack_message()` | POST webhook ou dry-run si `SLACK_WEBHOOK_URL` absent |
+| `notify_recent_activities()` | Notifie toutes les activités dans une fenêtre temporelle |
+| `notify_single_activity()` | Notifie une activité spécifique par ID |
 
-**Variété des messages :**
-- Index template = `MD5(nom) % len(templates)` → déterministe, reproductible, varié
-- 4 templates avec distance (ex: Running, Cycling), 4 sans (ex: Tennis, Yoga)
-- 8 phrases d'encouragement rotatives
+**Génération des messages :**
+- Index template = `MD5(nom_salarie) % len(templates)` → déterministe, reproductible, varié
+- 4 templates avec distance (Running, Cycling) + 4 sans (Tennis, Yoga)
 - Emojis mappés par sport (16 sports couverts)
-- Durée formatée : `< 60 min → "45 min"` | `>= 60 min → "1h30min"`
+- Durée formatée : `< 60 min → "45 min"` | `≥ 60 min → "1h30min"`
 
-**Mode dry-run :** si `SLACK_WEBHOOK_URL` n'est pas défini dans `.env`,
-les messages sont loggés en WARNING sans appel réseau — adapté au POC.
+**Mode dry-run :**
 
-### Tests implémentés — Notifications (`src/tests/test_notifications.py`)
+```python
+def send_slack_message(message, webhook_url=None) -> bool:
+    url = webhook_url or os.getenv("SLACK_WEBHOOK_URL", "")
+    if not url:
+        logger.warning("Mode dry-run : SLACK_WEBHOOK_URL non configuré")
+        return False
+    requests.post(url, json={"text": message}, timeout=10)
+    return True
+```
 
-| Test | Vérification |
-|---|---|
-| `test_format_message_with_distance` | Distance en km (10800m → "10.8") et durée présents |
-| `test_format_message_without_distance` | Nom du sport et durée présents (Tennis, 1h30) |
-| `test_format_message_with_comment` | Commentaire entre guillemets en fin de message |
-| `test_format_duration_minutes` | 1800 s → "30 min" (< 60 min) |
-| `test_format_duration_hours` | 5400 s → "1h..." (>= 60 min) |
-| `test_send_dry_run` | Sans webhook → retourne False, pas d'exception |
-| `test_notify_recent_count` | count = nombre d'activités dans silver.strava_activities |
+[↑ Retour au sommaire](#table-des-matières)
+
+---
 
 ## Flows Kestra — Orchestration
 
-### Structure des flows `kestra/flows/`
+### Dépendances entre flows
 
 ```mermaid
-flowchart LR
-    F1["01-ingestion\n4 tâches + 4 tests\nBronze"]
-    F2["02-transformation\n4 tâches + 4 tests\nSilver"]
-    F3["03-business\n5 tâches + 5 tests\nGold"]
-    F4["04-notifications\n1 tâche\nSlack"]
-    F5["05-full-pipeline\nsubflows 1→2→3→4\nPipeline complet"]
+flowchart TD
+    F5["05-full-pipeline\nPoint d'entrée\nSchedule: cron 0 8 * * *\n(commenté par défaut)"]
 
-    F5 --> F1 --> F2 --> F3 --> F4
+    F5 -->|"Subflow · wait=true\ntransmitFailed=true"| F1
+    F1 -->|"Subflow · wait=true\ntransmitFailed=true"| F2
+    F2 -->|"Subflow · wait=true\ntransmitFailed=true"| F3
+    F3 -->|"Subflow · wait=true\ntransmitFailed=false"| F4
+
+    F1["01-ingestion\n4 tâches + 4 tests validation\nBronze\nInputs: db_path"]
+    F2["02-transformation\n4 tâches + 4 tests validation\nSilver\nInputs: db_path"]
+    F3["03-business\n5 tâches + 5 tests validation\nGold\nInputs: db_path · prime_rate · wellbeing_threshold"]
+    F4["04-notifications\n1 tâche\nSlack dry-run si pas de webhook\nInputs: db_path · hours · webhook_url"]
 ```
 
-| Flow | ID Kestra | Tâches | Tests intégrés |
-|---|---|---|---|
-| `01_ingestion.yml` | `01-ingestion` | load_rh, load_sports, fetch_distances, generate_strava | 4 (lignes, nulls, positifs) |
-| `02_transformation.yml` | `02-transformation` | clean_rh, clean_sports, validate_distances, clean_strava | 4 (lignes, sportifs, Runing, distance_km) |
-| `03_business.yml` | `03-business` | compute_prime, compute_wellbeing, detect_anomalies, build_summary, build_leaderboard | 5 (lignes, montants, days_granted, total 161) |
-| `04_notifications.yml` | `04-notifications` | notify_recent_activities | — (dry-run) |
-| `05_full_pipeline.yml` | `05-full-pipeline` | Subflows 1→4 + print_summary | Via subflows |
+**Note `transmitFailed=false` sur `04-notifications`** : un échec Slack (réseau, webhook invalide) ne propage pas l'erreur au flow parent et ne marque pas le pipeline comme échoué.
 
-**Volumes montés dans Kestra (docker-compose.yml) :**
-- `./src` → `/app/src` — code source Python
-- `./data` → `/app/data` — fichier DuckDB
-- `./input` → `/app/input` — fichiers Excel source
-- `./kestra/flows` → `/app/flows` — flows YAML chargés au démarrage
+### Task runner Kestra
 
-**Task runner :** `io.kestra.plugin.core.runner.Process` — exécution en subprocess
-dans le conteneur Kestra, avec `sys.path.insert(0, '/app')` pour accéder à `src.*`.
+```yaml
+taskRunner:
+  type: io.kestra.plugin.core.runner.Process
+```
 
-**Paramètres dynamiques Kestra :**
+Chaque tâche Python s'exécute en subprocess dans le conteneur Kestra :
 
-| Variable | Défaut | Flow |
-|---|---|---|
+```python
+import sys
+sys.path.insert(0, "{{ vars.project_root }}")  # /app
+from src.ingestion.load_excel import load_rh_to_bronze
+load_rh_to_bronze("{{ vars.db_path }}")
+```
+
+### Paramètres dynamiques Kestra
+
+| Variable | Valeur par défaut | Flows concernés |
+|----------|-------------------|----------------|
 | `db_path` | `/app/data/sports_poc.duckdb` | Tous |
-| `prime_rate` | `0.05` | 03-business |
-| `wellbeing_threshold` | `15` | 03-business |
-| `hours` | `24` | 04-notifications |
+| `project_root` | `/app` | Tous |
+| `prime_rate` | `0.05` | `03-business`, `05-full-pipeline` |
+| `wellbeing_threshold` | `15` | `03-business`, `05-full-pipeline` |
+| `hours` | `24` | `04-notifications` |
+| `webhook_url` | *(vide)* | `04-notifications` |
+
+[↑ Retour au sommaire](#table-des-matières)
+
+---
 
 ## CLI local — main.py
 
 Script d'exécution du pipeline sans Kestra, via `argparse` :
 
-```
+```bash
 python main.py run                        # Pipeline complet Bronze→Silver→Gold
 python main.py run --notify               # + notifications Slack
-python main.py run --prime-rate 0.08      # Taux prime override
-python main.py run --threshold 10         # Seuil bien-être override
+python main.py run --prime-rate 0.08      # Override taux prime (8%)
+python main.py run --threshold 10         # Override seuil bien-être
 python main.py notify                     # Activités des 24 dernières heures
 python main.py notify --id 42             # Activité spécifique (démo live)
-python main.py status                     # Lignes par table DuckDB
+python main.py status                     # Nombre de lignes par table DuckDB
 ```
 
+**Architecture argparse :**
+- `--db-path` : option globale sur le parseur parent (avant la sous-commande)
+- `--prime-rate`, `--threshold` : options sur le sous-parseur `run` uniquement
+
+> ⚠️ Correction appliquée : ces options doivent être sur le sous-parseur `run`, pas sur le parseur parent, pour être utilisables après le nom de la sous-commande (`python main.py run --prime-rate 0.08`).
+
 **Résumé final affiché après `run` :**
+
 ```
 =======================================================
   RÉSUMÉ PIPELINE — POC Avantages Sportifs
@@ -577,36 +462,205 @@ python main.py status                     # Lignes par table DuckDB
 =======================================================
 ```
 
+[↑ Retour au sommaire](#table-des-matières)
+
+---
+
+## Tests — Stratégie à 3 niveaux
+
+### Vue d'ensemble
+
+```mermaid
+flowchart LR
+    subgraph L1["Niveau 1 — pytest (fonctions Python)"]
+        P1["test_ingestion.py\n20 tests\nBronze"]
+        P2["test_transformation.py\n16 tests\nSilver"]
+        P3["test_business.py\n22 tests\nGold"]
+        P4["test_notifications.py\n7 tests\nSlack"]
+    end
+
+    subgraph L2["Niveau 2 — SODA Core (qualité données)"]
+        S1["checks.yml\nSilver uniquement\nnulls · unicité · plages · dates"]
+    end
+
+    subgraph L3["Niveau 3 — Assertions Kestra (intégration)"]
+        K1["Post-tâche dans chaque flow\nVérification lignes attendues\nexemple: rh_raw = 161 lignes"]
+    end
+
+    BR["🟫 Bronze"] --> P1
+    SI["🥈 Silver"] --> P2
+    SI --> S1
+    SI --> K1
+    GO["🥇 Gold"] --> P3
+    GO --> K1
+    NO["📱 Slack"] --> P4
+```
+
+### Détail — test_ingestion.py (20 tests)
+
+**RH & Sportif (Excel → Bronze)**
+
+| Test | Vérification |
+|------|-------------|
+| `test_load_rh_row_count` | `bronze.rh_raw` = exactement 161 lignes |
+| `test_load_rh_columns_snake_case` | Toutes colonnes `[a-z0-9_]+` |
+| `test_load_rh_no_null_id` | `id_salarie` non nul |
+| `test_load_rh_has_ingested_at` | `_ingested_at` présent et non nul |
+| `test_load_sports_row_count` | `bronze.sports_raw` = 161 lignes |
+| `test_load_sports_no_null_id` | `id_salarie` non nul |
+
+**Strava & Distances**
+
+| Test | Vérification |
+|------|-------------|
+| `test_strava_generation_row_count` | > 1 000 lignes |
+| `test_strava_columns` | 7 colonnes exactes |
+| `test_strava_date_range` | Toutes dates dans les 12 derniers mois |
+| `test_strava_only_sportifs` | Uniquement IDs avec sport déclaré |
+| `test_distances_row_count` | Exactement 68 lignes (sportifs) |
+| `test_distances_positive` | `distance_km > 0` |
+| `test_haversine_lattes` | Lattes → distance < 5 km |
+| `test_haversine_nimes` | Nîmes → distance > 30 km |
+
+### Détail — test_transformation.py (16 tests)
+
+Fixture `scope="module"` : Bronze chargé une fois, **anomalie injectée** (`UPDATE bronze.distances_raw SET distance_km = 20.0` sur un marcheur), toutes les transformations Silver exécutées.
+
+| Test | Vérification |
+|------|-------------|
+| `test_employees_row_count` | 161 lignes |
+| `test_employees_is_sportif` | 68 avec `is_sportif_deplacement = TRUE` |
+| `test_employees_salary_range` | Salaires entre 20 000 et 100 000 € |
+| `test_sports_no_runing` | Aucun `'Runing'` (corrigé en `'Running'`) |
+| `test_distances_anomaly_detection` | ≥ 1 `is_valid = FALSE` (anomalie injectée) |
+| `test_distances_valid_have_no_reason` | `anomaly_reason = NULL` si `is_valid = TRUE` |
+| `test_strava_distance_km` | `distance_km = distance_m / 1000` (tolérance 0.001) |
+| `test_strava_duree_minutes` | `duree_minutes = temps_ecoule_s / 60` |
+
+### Détail — test_business.py (22 tests)
+
+Fixture `scope="module"` : Bronze + anomalie + Silver + Gold complet.
+
+| Test | Vérification |
+|------|-------------|
+| `test_prime_row_count` | 68 lignes (sportifs uniquement) |
+| `test_prime_calcul_taux_defaut` | `prime_montant = salaire × 0.05` (tolérance 0.01) |
+| `test_prime_custom_rate` | Taux 10 % → montants ≈ 2× supérieurs à 5 % |
+| `test_wellbeing_row_count` | 161 lignes (tous salariés, LEFT JOIN) |
+| `test_wellbeing_days_granted_binary` | `days_granted` ∈ {0, 5} uniquement |
+| `test_wellbeing_seuil_14_non_eligible` | Seuil 14 → éligibles ≥ ceux du seuil 15 |
+| `test_cost_summary_row_count` | 6 lignes (5 BU + TOTAL) |
+| `test_cost_summary_bu_names` | 5 BU : Finance, Marketing, R&D, Support, Ventes |
+| `test_leaderboard_classement_starts_at_one` | `MIN(classement) = 1` |
+
+### Détail — test_notifications.py (7 tests)
+
+| Test | Vérification |
+|------|-------------|
+| `test_format_message_with_distance` | Distance en km et durée présentes dans le message |
+| `test_format_message_without_distance` | Nom du sport et durée présents (Tennis, 1h30) |
+| `test_format_message_with_comment` | Commentaire entre guillemets en fin de message |
+| `test_format_duration_minutes` | `1800 s → "30 min"` |
+| `test_format_duration_hours` | `5400 s → "1h..."` |
+| `test_send_dry_run` | Sans webhook → `False`, pas d'exception |
+| `test_notify_recent_count` | count = `COUNT(*) FROM silver.strava_activities` |
+
+[↑ Retour au sommaire](#table-des-matières)
+
+---
+
+## Docker — Images et déploiement
+
+### Dockerfiles
+
+| Fichier | Base | Rôle |
+|---------|------|------|
+| `docker/Dockerfile.pipeline` | `python:3.11-slim` | Image pipeline ETL Bronze→Silver→Gold |
+| `docker/metabase/Dockerfile.metabase` | `metabase/metabase:latest` + `debian:12-slim` | Metabase avec driver DuckDB v1.5.1.0 |
+
+**`docker/Dockerfile.pipeline`** :
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY src/ ./src/
+COPY main.py .
+RUN mkdir -p /app/data /app/input
+ENV DUCKDB_PATH=/app/data/sports_poc.duckdb
+ENTRYPOINT ["python", "main.py"]
+CMD ["run"]
+```
+
+**`docker/metabase/Dockerfile.metabase`** — Build multi-étapes :
+1. Stage `downloader` (debian:12-slim) : télécharge le JAR depuis GitHub via `curl`
+2. Stage final (metabase:latest) : copie le JAR dans `/plugins/`
+
+### Services Docker Compose
+
+```mermaid
+graph TD
+    subgraph Compose["docker-compose.yml"]
+        PG["postgres-sports\npostgres:18\n:5433→:5432\nhealthcheck: pg_isready"]
+        KE["kestra-sports\nkestra/kestra:latest\n:8082→:8080 · :8083→:8081\nstorage.type: local"]
+        MB["metabase-sports\nDockerfile.metabase\n:3000→:3000\nhealthcheck: /api/health"]
+        PP["pipeline-sports\nDockerfile.pipeline\nprofil: run\nrestart: no"]
+    end
+
+    PG -->|"condition: service_healthy"| KE
+    KE -->|"depends_on"| MB
+    KE -->|"depends_on"| PP
+
+    PG --- VPG[("postgres_sports_data\n/var/lib/postgresql\nfix PostgreSQL 18+")]
+    KE --- VKE[("kestra_sports_data\n/app/storage\nstorage local Kestra")]
+    MB --- VMB[("metabase_sports_data\n/metabase-data")]
+    KE & MB & PP --- VDB[("./data\nsports_poc.duckdb\npartagé")]
+    KE & PP --- VIN[("./input\nExcel sources")]
+```
+
+**Corrections appliquées :**
+
+| Problème | Ancienne valeur | Valeur corrigée |
+|----------|-----------------|-----------------|
+| Volume PostgreSQL 18+ | `/var/lib/postgresql/data` | `/var/lib/postgresql` |
+| Kestra storage | absent | `storage.type: local · base-path: /app/storage` |
+| Driver DuckDB Metabase | volume vide `./docker/metabase/plugins` | Build multi-stage Dockerfile |
+
+[↑ Retour au sommaire](#table-des-matières)
+
+---
+
 ## Problèmes rencontrés et solutions
 
-### PostgreSQL 18+ — incompatibilité du volume
+### 1. PostgreSQL 18+ — incompatibilité de volume
 
-**Contexte :** PostgreSQL 18 a modifié sa structure interne de stockage. Monter un volume sur `/var/lib/postgresql/data` provoque une erreur d'initialisation car PostgreSQL crée désormais des sous-dossiers supplémentaires.
+**Contexte :** PostgreSQL 18 a modifié sa structure interne de stockage. Le répertoire `data/` est créé dans un sous-dossier de `PGDATA`, qui n'est plus `/var/lib/postgresql/data` mais un sous-dossier variable.
 
 **Symptôme :**
 ```
 initdb: error: directory "/var/lib/postgresql/data" exists but is not empty
 ```
 
-**Solution :** Monter le volume sur le répertoire parent `/var/lib/postgresql` et laisser PostgreSQL créer lui-même son arborescence.
+**Solution :** Monter le volume sur `/var/lib/postgresql` et laisser PostgreSQL créer sa propre arborescence :
 
 ```yaml
-# ✅ Compatible PostgreSQL 18+
 volumes:
-  - postgres_sports_data:/var/lib/postgresql
-
-# ❌ Incompatible
-# volumes:
-#   - postgres_sports_data:/var/lib/postgresql/data
+  - postgres_sports_data:/var/lib/postgresql    # ✅
+  # - postgres_sports_data:/var/lib/postgresql/data  # ❌
 ```
 
-**Commit de correction :** `fix(docker): correction du volume PostgreSQL 18+ (/var/lib/postgresql au lieu de /data)`
+**Si le volume existant est corrompu depuis une ancienne installation :**
+```bash
+docker-compose down -v && docker-compose up -d
+```
+
+**Commit :** `fix(docker): correction du volume PostgreSQL 18+ (/var/lib/postgresql au lieu de /data)`
 
 ---
 
-### Kestra — configuration storage obligatoire
+### 2. Kestra — configuration storage obligatoire
 
-**Contexte :** En mode `server standalone`, Kestra exige une configuration explicite du backend de stockage des fichiers (logs, outputs). Sans cette configuration, le serveur démarre mais échoue à la première exécution de flow.
+**Contexte :** En mode `server standalone`, Kestra exige une configuration explicite du backend de stockage des outputs de tâches depuis les versions récentes. Sans cette config, le serveur démarre mais les flows échouent à l'écriture des logs/outputs.
 
 **Symptôme :**
 ```
@@ -621,24 +675,27 @@ KESTRA_CONFIGURATION: |
     storage:
       type: local
       local:
-        base-path: /app/storage   # dossier monté en volume
+        base-path: /app/storage
     repository:
       type: postgres
     queue:
       type: postgres
 ```
 
-Le dossier `/app/storage` est persisté via le volume `kestra_sports_data`.
-
-**Commit de correction :** `fix(docker): ajout effectif de la configuration storage locale Kestra`
+**Commit :** `fix(docker): ajout effectif de la configuration storage locale Kestra`
 
 ---
 
-### DuckDB — ORDER BY dans UNION ALL
+### 3. DuckDB — ORDER BY dans UNION ALL
 
-**Contexte :** DuckDB interdit `ORDER BY` directement dans un bras de `UNION ALL`. Nécessaire pour la table `gold.cost_summary` qui doit afficher les BU par ordre alphabétique avec la ligne TOTAL en dernier.
+**Contexte :** DuckDB (contrairement à PostgreSQL) interdit un `ORDER BY` directement appliqué sur le résultat d'un `UNION ALL`. La table `gold.cost_summary` doit afficher TOTAL en dernier.
 
-**Solution :** Envelopper le `UNION ALL` dans un CTE intermédiaire :
+**Erreur :**
+```
+BinderException: Could not ORDER BY column "CASE WHEN bu = 'TOTAL' THEN 1 ELSE 0 END"
+```
+
+**Solution :** Envelopper le `UNION ALL` dans un CTE avant d'appliquer `ORDER BY` :
 
 ```sql
 WITH bu_data AS (...),
@@ -654,19 +711,36 @@ ORDER BY CASE WHEN bu = 'TOTAL' THEN 1 ELSE 0 END, bu
 
 ---
 
-### argparse — options après sous-commande
+### 4. argparse — options globales vs options de sous-commande
 
-**Contexte :** Dans argparse, les options définies sur le parseur parent doivent apparaître **avant** le nom de la sous-commande. Mettre `--prime-rate` sur le parseur parent empêchait `python main.py run --prime-rate 0.08`.
+**Contexte :** En argparse Python, les options définies sur le parseur **parent** doivent être placées **avant** le nom de la sous-commande dans la ligne de commande. Définir `--prime-rate` sur le parseur parent empêche `python main.py run --prime-rate 0.08`.
 
-**Solution :** Déplacer `--prime-rate` et `--threshold` sur le sous-parseur `run` uniquement.
+**Erreur utilisateur :**
+```bash
+python main.py run --prime-rate 0.08
+# error: unrecognized arguments: --prime-rate
+```
 
-**Commit de correction :** `fix(pipeline): correction argparse --prime-rate et --threshold après la sous-commande run`
+**Solution :** Déplacer `--prime-rate` et `--threshold` sur le sous-parseur `run` uniquement :
+
+```python
+run_parser.add_argument("--prime-rate", type=float, default=None)
+run_parser.add_argument("--threshold", type=int, default=None)
+# Et non plus sur parser.add_argument(...)
+```
+
+**Commit :** `fix(pipeline): correction argparse --prime-rate et --threshold après la sous-commande run`
+
+[↑ Retour au sommaire](#table-des-matières)
 
 ---
 
 ## Sécurité
 
-- Données RH non versionnées sur GitHub (`.gitignore`)
-- Fichiers Excel dans `input/` (local uniquement)
-- Variables sensibles (clés API) dans `.env` (non versionné)
-- DuckDB en volume Docker local, pas d'exposition réseau
+- **Données RH** non versionnées sur GitHub — `data/` et `*.duckdb` dans `.gitignore`
+- **Fichiers Excel** dans `input/` (local uniquement, non commités)
+- **Variables sensibles** (clés API, webhook) dans `.env` (non versionné — `.env.example` versionné)
+- **DuckDB** en volume Docker local, pas d'exposition réseau externe
+- **PostgreSQL Kestra** accessible uniquement en interne Docker (réseau `default`)
+
+[↑ Retour au sommaire](#table-des-matières)
