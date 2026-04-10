@@ -691,6 +691,26 @@ docker-compose up -d metabase-sports
 docker-compose logs metabase-sports | grep -i duckdb
 ```
 
+### Kestra — OSError: [Errno 35] Resource deadlock avoided (macOS)
+
+**Symptôme :** Les flows Kestra échouent avec `OSError: [Errno 35] Resource deadlock avoided` ou `ModuleNotFoundError` lors de l'accès aux fichiers Python montés.
+
+**Cause :** Docker Desktop sur macOS utilise une VM Linux intermédiaire pour les bind mounts (`./src:/app/src`, `./data:/app/data`). Les accès concurrents depuis le conteneur via cette couche de virtualisation provoquent des deadlocks noyau.
+
+**Solution appliquée :**
+
+1. **Image Kestra custom** (`docker/Dockerfile.kestra`) — le code source et les dépendances sont **copiés** dans l'image au build, éliminant les bind mounts `./src` et `./input` :
+   ```bash
+   docker-compose build   # intègre src/ et input/ dans l'image
+   ```
+
+2. **Volume Docker nommé** pour DuckDB — remplace le bind mount `./data:/app/data` par un volume géré par Docker (`kestra_data`), partagé entre Kestra et Metabase sans passer par le filesystem macOS.
+
+3. **Synchronisation manuelle** si vous avez besoin du DuckDB sur le host :
+   ```bash
+   ./scripts/sync_data.sh   # copie le DuckDB du volume vers ./data/
+   ```
+
 [↑ Retour au sommaire](#-table-des-matières)
 
 ---

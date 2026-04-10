@@ -575,8 +575,9 @@ Fixture `scope="module"` : Bronze + anomalie + Silver + Gold complet.
 
 | Fichier | Base | Rôle |
 |---------|------|------|
+| `docker/Dockerfile.kestra` | `kestra/kestra:latest` | Kestra avec Python + dépendances + code copiés (anti-deadlock macOS) |
 | `docker/Dockerfile.pipeline` | `python:3.11-slim` | Image pipeline ETL Bronze→Silver→Gold |
-| `docker/metabase/Dockerfile.metabase` | `metabase/metabase:latest` + `debian:12-slim` | Metabase avec driver DuckDB v1.5.1.0 |
+| `docker/metabase/Dockerfile.metabase` | `eclipse-temurin:21-jre` | Metabase avec driver DuckDB (glibc, multi-plateforme) |
 
 **`docker/Dockerfile.pipeline`** :
 ```dockerfile
@@ -624,7 +625,8 @@ graph TD
 |----------|-----------------|-----------------|
 | Volume PostgreSQL 18+ | `/var/lib/postgresql/data` | `/var/lib/postgresql` |
 | Kestra storage | absent | `storage.type: local · base-path: /app/storage` |
-| Driver DuckDB Metabase | volume vide `./docker/metabase/plugins` | Build multi-stage Dockerfile |
+| Driver DuckDB Metabase | volume vide `./docker/metabase/plugins` | `eclipse-temurin:21-jre` + `ADD` direct |
+| Deadlock macOS (Kestra) | bind mounts `./src` et `./data` | image custom + volume nommé `kestra_data` |
 
 [↑ Retour au sommaire](#table-des-matières)
 
@@ -730,6 +732,41 @@ run_parser.add_argument("--threshold", type=int, default=None)
 ```
 
 **Commit :** `fix(pipeline): correction argparse --prime-rate et --threshold après la sous-commande run`
+
+---
+
+### 5. Docker macOS — OSError: [Errno 35] Resource deadlock avoided
+
+**Contexte :** Docker Desktop sur macOS passe par une VM Linux (via VirtioFS ou osxfs) pour les bind mounts. Les accès concurrent depuis le conteneur Kestra provoquent des deadlocks noyau lors de la lecture de fichiers Python montés depuis le host.
+
+**Symptôme :**
+```
+OSError: [Errno 35] Resource deadlock avoided
+ModuleNotFoundError: No module named 'pandas'
+```
+
+**Cause profonde :** Les bind mounts `./src:/app/src` et `./data:/app/data` exposent le filesystem macOS à Docker. Sous charge (plusieurs imports Python simultanés), le mécanisme de locking du VFS lève `EDEADLK` (errno 35).
+
+**Solution en 3 volets :**
+
+1. **Image Kestra custom** (`docker/Dockerfile.kestra`) — `src/` et `input/` sont copiés dans l'image au `docker-compose build`. Zéro bind mount pour le code source.
+
+2. **Volume Docker nommé** pour le DuckDB — `kestra_data` remplace `./data:/app/data`. Docker gère le volume en interne, sans passer par le filesystem macOS. Kestra et Metabase accèdent au même volume :
+   ```yaml
+   kestra-sports:
+     volumes:
+       - kestra_data:/app/data   # ✅ volume nommé — pas de deadlock
+   metabase-sports:
+     volumes:
+       - kestra_data:/data       # ✅ même volume partagé
+   ```
+
+3. **Script de synchronisation** (`scripts/sync_data.sh`) — copie le DuckDB depuis le volume vers le host quand nécessaire (debug, analyse locale) :
+   ```bash
+   ./scripts/sync_data.sh
+   ```
+
+**Commit :** `fix(docker): remplacement des bind mounts par volumes nommés pour éviter les deadlocks macOS`
 
 [↑ Retour au sommaire](#table-des-matières)
 
