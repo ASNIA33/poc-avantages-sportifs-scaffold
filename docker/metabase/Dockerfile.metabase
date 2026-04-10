@@ -39,6 +39,3 @@ COPY --from=downloader /duckdb.metabase-driver.jar /plugins/duckdb.metabase-driv
 
 # Répertoire plugins déclaré (variable d'env pour Metabase)
 ENV MB_PLUGINS_DIR=/plugins
-
-# Revenir à l'utilisateur non-root Metabase
-USER metabase
