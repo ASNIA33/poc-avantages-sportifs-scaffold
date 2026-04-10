@@ -56,9 +56,11 @@ services:
         condition: service_healthy
     command: server standalone
 
-  # --- Metabase : dashboards ---
+  # --- Metabase : dashboards (avec driver DuckDB intégré) ---
   metabase-sports:
-    image: metabase/metabase:latest
+    build:
+      context: .
+      dockerfile: docker/metabase/Dockerfile.metabase
     container_name: metabase-sports
     restart: unless-stopped
     ports:
@@ -66,12 +68,38 @@ services:
     environment:
       MB_DB_TYPE: h2
       MB_DB_FILE: /metabase-data/metabase.db
+      MB_PLUGINS_DIR: /plugins
     volumes:
       - metabase_sports_data:/metabase-data
-      - ./data:/data
-      - ./docker/metabase/plugins:/plugins
+      - ./data:/data:ro
     depends_on:
       - kestra-sports
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # --- Pipeline : exécution one-shot (profil "run") ---
+  # Usage : docker-compose --profile run up pipeline-sports
+  pipeline-sports:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pipeline
+    container_name: pipeline-sports
+    profiles:
+      - run
+    environment:
+      - DUCKDB_PATH=/app/data/sports_poc.duckdb
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./input:/app/input
+    depends_on:
+      - kestra-sports
+    restart: "no"
 
 volumes:
   postgres_sports_data:
