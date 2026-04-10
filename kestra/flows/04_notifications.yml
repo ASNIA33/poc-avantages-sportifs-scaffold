@@ -1,0 +1,66 @@
+# =============================================================================
+# Flow 04 — Notifications Slack
+# Envoie les messages Slack pour les activités sportives récentes.
+# Ce flow peut être exécuté de façon autonome ou après le flow 03-business.
+#
+# Configuration :
+#   - Définir SLACK_WEBHOOK_URL dans les variables d'environnement Kestra
+#     ou dans le fichier .env pour activer l'envoi réel.
+#   - Sans webhook configuré : mode dry-run (messages loggés uniquement).
+# =============================================================================
+
+id: 04-notifications
+namespace: poc.avantages.sportifs
+description: |
+  Notifications Slack — Envoie des messages de félicitations pour les activités
+  sportives récentes des salariés. En mode dry-run si SLACK_WEBHOOK_URL n'est
+  pas configuré (adapté au POC).
+
+variables:
+  db_path: "/app/data/sports_poc.duckdb"
+  project_root: "/app"
+  # Fenêtre temporelle en heures — ajuster selon la fréquence d'exécution
+  hours: "24"
+  # Webhook Slack — laisser vide pour le mode dry-run (log uniquement)
+  webhook_url: ""
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Tâche 1 : Envoi des notifications Slack pour les activités récentes
+  # ---------------------------------------------------------------------------
+  - id: notify_recent_activities
+    type: io.kestra.plugin.scripts.python.Script
+    description: Envoie les messages Slack pour les activités des dernières N heures
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.notifications.slack_messenger import notify_recent_activities
+      webhook = "{{ vars.webhook_url }}" or None
+      count = notify_recent_activities(
+        db_path="{{ vars.db_path }}",
+        hours=int("{{ vars.hours }}"),
+        webhook_url=webhook,
+      )
+      print(f"Notifications : {count} message(s) traité(s) sur les dernières {{ vars.hours }}h")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 2 (optionnelle) : Notifier une activité spécifique par ID (démo live)
+  # Pour activer : décommenter et renseigner activity_id
+  # ---------------------------------------------------------------------------
+  # - id: notify_single
+  #   type: io.kestra.plugin.scripts.python.Script
+  #   description: Envoie la notification pour une activité spécifique (démo live)
+  #   taskRunner:
+  #     type: io.kestra.plugin.core.runner.Process
+  #   script: |
+  #     import sys
+  #     sys.path.insert(0, "{{ vars.project_root }}")
+  #     from src.notifications.slack_messenger import notify_single_activity
+  #     result = notify_single_activity(
+  #       activity_id=1,  # Remplacer par l'ID souhaité
+  #       db_path="{{ vars.db_path }}",
+  #     )
+  #     print(f"Notification activité : {'envoyée' if result else 'introuvable'}")
