@@ -31,6 +31,9 @@ warn() { echo -e "${YELLOW}⚠${NC} $*"; }
 # ---------------------------------------------------------------------------
 # 1. Démarrage des conteneurs
 # ---------------------------------------------------------------------------
+log "Build des images Docker custom (Kestra + Metabase)..."
+docker-compose build
+
 log "Démarrage de l'infrastructure Docker..."
 docker-compose up -d postgres-sports kestra-sports metabase-sports
 
