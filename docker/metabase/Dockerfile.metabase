@@ -4,8 +4,9 @@
 #   1. Téléchargement du driver DuckDB (debian:12-slim)
 #   2. Image finale Metabase avec driver installé dans /plugins/
 #
-# Driver : duckdb.metabase-driver.jar v0.2.4 (multi-plateforme x86 + ARM)
-# Source : https://github.com/MotherDuck-Open-Source/metabase_duckdb_driver
+# Driver : duckdb.metabase-driver.jar v1.5.1.0 (multi-plateforme)
+# Source : https://github.com/motherduckdb/metabase_duckdb_driver
+# Natives embarquées : libduckdb_java.so_linux_arm64 + libduckdb_java.so_linux_amd64
 # Compatibilité : aarch64 (Apple Silicon) et x86_64
 # =============================================================================
 
@@ -17,24 +18,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ARG DUCKDB_DRIVER_VERSION=0.2.4
-ARG DUCKDB_DRIVER_URL=https://github.com/MotherDuck-Open-Source/metabase_duckdb_driver/releases/download/${DUCKDB_DRIVER_VERSION}/duckdb.metabase-driver.jar
+ARG DUCKDB_DRIVER_VERSION=1.5.1.0
+ARG DUCKDB_DRIVER_URL=https://github.com/motherduckdb/metabase_duckdb_driver/releases/download/${DUCKDB_DRIVER_VERSION}/duckdb.metabase-driver.jar
 
 RUN curl -fsSL -o /duckdb.metabase-driver.jar "${DUCKDB_DRIVER_URL}" \
     && echo "Taille du JAR téléchargé :" \
     && ls -lh /duckdb.metabase-driver.jar
 
 # --- Étape 2 : image Metabase finale ---
+# metabase/metabase:latest est basé sur Alpine — utiliser apk (pas apt-get)
 FROM metabase/metabase:latest
 
-# Installer libstdc++6 requis par le driver natif DuckDB (JNI)
-# L'image Eclipse Temurin est Debian/Ubuntu-based — apt-get disponible
+# Installer libstdc++ requis par le driver natif DuckDB (JNI)
 # Compatible aarch64 (Apple Silicon) et x86_64
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libstdc++6 \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache libstdc++
 
 # Copier le driver dans le répertoire des plugins Metabase
 COPY --from=downloader /duckdb.metabase-driver.jar /plugins/duckdb.metabase-driver.jar
@@ -42,5 +40,5 @@ COPY --from=downloader /duckdb.metabase-driver.jar /plugins/duckdb.metabase-driv
 # Répertoire plugins déclaré (variable d'env pour Metabase)
 ENV MB_PLUGINS_DIR=/plugins
 
-# Revenir à l'utilisateur Metabase non-root
+# Revenir à l'utilisateur non-root Metabase
 USER metabase
