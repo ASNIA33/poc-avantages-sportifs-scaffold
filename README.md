@@ -78,7 +78,7 @@ flowchart LR
 ### Prérequis
 - Docker & Docker Compose
 - Python 3.11+
-- Clé API Google Maps (pour le calcul des distances)
+- Clé API Google Maps (optionnelle — sans clé, le pipeline fonctionne en mode simulation haversine)
 
 ### Installation
 
@@ -108,14 +108,10 @@ docker-compose ps
 
 ### Configuration
 
-Copier `.env.example` en `.env` et renseigner les variables :
-
 ```bash
 cp .env.example .env
-# Éditer .env : optionnellement ajouter GOOGLE_MAPS_API_KEY
+# Éditer .env selon le mode souhaité (voir section Configuration ci-dessous)
 ```
-
-Sans clé API, le pipeline utilise automatiquement le mode simulation haversine.
 
 ### Lancer les scripts manuellement
 
@@ -178,6 +174,101 @@ python main.py status
 # Lancer tous les tests (ingestion + transformation + business + notifications)
 python -m pytest src/tests/ -v
 ```
+
+---
+
+## ⚙️ Configuration
+
+### Deux modes de fonctionnement
+
+Le pipeline est **100% fonctionnel dans les deux modes** — aucune clé API n'est requise pour démarrer.
+
+| Mode | Google Maps | Slack | Cas d'usage |
+|------|-------------|-------|-------------|
+| **Mode complet** | Clé API configurée → distances réelles (routières) | Webhook configuré → messages envoyés | Production, démo client |
+| **Mode autonome** (défaut) | Pas de clé → calcul haversine (distances à vol d'oiseau) | Pas de webhook → messages loggés en WARNING | Développement, tests, démo rapide |
+
+#### Mode autonome (sans clé API)
+
+C'est le comportement par défaut dès `cp .env.example .env` sans modification :
+
+- **Distances** : calculées par la formule haversine entre l'adresse du salarié et `1362 Av. des Platanes, 34970 Lattes`. Les distances sont approximatives (à vol d'oiseau), légèrement inférieures aux distances réelles.
+- **Slack** : les messages de félicitations sont générés et affichés dans les logs (`WARNING: Mode dry-run`) mais aucun appel réseau n'est effectué. Utile pour vérifier le contenu des messages sans webhook.
+
+#### Mode complet (avec clés API)
+
+Renseigner les variables optionnelles dans `.env` :
+
+```bash
+# Distances réelles (routières, piétonnes, cyclistes)
+GOOGLE_MAPS_API_KEY=AIza...
+
+# Messages Slack envoyés aux salariés
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+```
+
+### Variables d'environnement
+
+#### Slack (optionnel)
+
+Sans webhook configuré : mode dry-run, messages générés dans les logs mais non envoyés.
+
+Pour obtenir un webhook Incoming Webhooks : https://api.slack.com/apps → créer une app → Incoming Webhooks → Activate.
+
+```env
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../...
+```
+
+#### Google Maps (optionnel)
+
+Sans clé : distances simulées par haversine (vol d'oiseau). Résultats cohérents pour la démo.
+
+Pour obtenir une clé : [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Bibliothèque → Distance Matrix API. Attention : facturation après le free tier.
+
+```env
+GOOGLE_MAPS_API_KEY=AIzaSy...
+```
+
+#### Base de données
+
+```env
+DUCKDB_PATH=data/sports_poc.duckdb
+```
+
+Chemin vers le fichier DuckDB local. Modifiable pour pointer vers un fichier partagé ou monté en volume Docker.
+
+#### Paramètres métier
+
+Ces valeurs pilotent directement les calculs Gold. Elles peuvent être modifiées pour la démo live **sans toucher au code**.
+
+```env
+PRIME_RATE=0.05              # Taux de la prime sportive (5% par défaut)
+WELLBEING_THRESHOLD=15       # Nb minimum d'activités pour les jours bien-être
+WALK_MAX_DISTANCE_KM=15      # Distance max éligible en marche/running
+BIKE_MAX_DISTANCE_KM=25      # Distance max éligible en vélo/trottinette
+COMPANY_ADDRESS=1362 Avenue des Platanes, 34970 Lattes
+```
+
+### Changer les paramètres pour la démo live
+
+**Option 1 — via `.env`** (persistant) :
+
+```bash
+# Modifier .env
+PRIME_RATE=0.08
+WELLBEING_THRESHOLD=10
+
+# Relancer le pipeline
+python main.py run
+```
+
+**Option 2 — via les arguments CLI** (one-shot, sans modifier `.env`) :
+
+```bash
+python main.py run --prime-rate 0.08 --threshold 10
+```
+
+Les arguments CLI ont priorité sur les variables d'environnement.
 
 ---
 
