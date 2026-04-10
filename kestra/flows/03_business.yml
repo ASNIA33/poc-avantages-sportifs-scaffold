@@ -1,0 +1,203 @@
+# =============================================================================
+# Flow 03 — Calculs métier Gold
+# Calcule les éligibilités (prime, bien-être), détecte les anomalies et
+# construit les résumés KPI dans la couche Gold (DuckDB).
+# Ce flow doit être exécuté APRÈS le flow 02-transformation.
+# =============================================================================
+
+id: 03-business
+namespace: poc.avantages.sportifs
+description: |
+  Calculs métier Gold — Éligibilité prime sportive (taux paramétrable), éligibilité
+  jours bien-être (seuil paramétrable), anomalies de distance, résumé coûts par BU
+  et classement des activités.
+
+variables:
+  db_path: "/app/data/sports_poc.duckdb"
+  project_root: "/app"
+  # Paramètres métier — modifiables sans changer le code
+  prime_rate: "0.05"
+  wellbeing_threshold: "15"
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Tâche 1 : Calcul éligibilité prime sportive → gold.prime_eligibility
+  # ---------------------------------------------------------------------------
+  - id: compute_prime
+    type: io.kestra.plugin.scripts.python.Script
+    description: Calcule l'éligibilité à la prime sportive (taux = prime_rate)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.business.compute_prime import compute_prime_eligibility
+      n = compute_prime_eligibility("{{ vars.db_path }}", prime_rate=float("{{ vars.prime_rate }}"))
+      print(f"gold.prime_eligibility : {n} lignes (taux {{ vars.prime_rate }})")
+
+  # Test post-tâche : 68 lignes, éligibles ont prime > 0, non éligibles ont prime = 0
+  - id: test_prime
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] gold.prime_eligibility : 68 lignes, cohérence montants"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM gold.prime_eligibility").fetchone()[0]
+      eligible = conn.execute(
+        "SELECT COUNT(*) FROM gold.prime_eligibility WHERE is_eligible = TRUE"
+      ).fetchone()[0]
+      bad_montant = conn.execute(
+        "SELECT COUNT(*) FROM gold.prime_eligibility WHERE is_eligible = TRUE AND prime_montant <= 0"
+      ).fetchone()[0]
+      conn.close()
+      assert count == 68, f"[FAIL] prime_eligibility : attendu 68, obtenu {count}"
+      assert eligible > 0, "[FAIL] prime_eligibility : aucun salarié éligible"
+      assert bad_montant == 0, f"[FAIL] prime_eligibility : {bad_montant} éligible(s) avec montant <= 0"
+      print(f"[PASS] gold.prime_eligibility : {count} lignes, {eligible} éligibles — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 2 : Calcul éligibilité jours bien-être → gold.wellbeing_eligibility
+  # ---------------------------------------------------------------------------
+  - id: compute_wellbeing
+    type: io.kestra.plugin.scripts.python.Script
+    description: Calcule l'éligibilité aux jours bien-être (seuil = wellbeing_threshold activités)
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.business.compute_wellbeing import compute_wellbeing_eligibility
+      n = compute_wellbeing_eligibility(
+        "{{ vars.db_path }}", threshold=int("{{ vars.wellbeing_threshold }}")
+      )
+      print(f"gold.wellbeing_eligibility : {n} lignes (seuil {{ vars.wellbeing_threshold }} activités)")
+
+  # Test post-tâche : 161 lignes, days_granted cohérent avec is_eligible
+  - id: test_wellbeing
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] gold.wellbeing_eligibility : 161 lignes, days_granted dans {0, 5}"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM gold.wellbeing_eligibility").fetchone()[0]
+      bad_days = conn.execute(
+        "SELECT COUNT(*) FROM gold.wellbeing_eligibility WHERE days_granted NOT IN (0, 5)"
+      ).fetchone()[0]
+      eligible = conn.execute(
+        "SELECT COUNT(*) FROM gold.wellbeing_eligibility WHERE is_eligible = TRUE"
+      ).fetchone()[0]
+      conn.close()
+      assert count == 161, f"[FAIL] wellbeing_eligibility : attendu 161, obtenu {count}"
+      assert bad_days == 0, f"[FAIL] wellbeing_eligibility : {bad_days} days_granted hors {{0,5}}"
+      print(f"[PASS] gold.wellbeing_eligibility : {count} lignes, {eligible} éligibles — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 3 : Détection anomalies de distance → gold.distance_anomalies
+  # ---------------------------------------------------------------------------
+  - id: detect_anomalies
+    type: io.kestra.plugin.scripts.python.Script
+    description: Extrait les distances incohérentes et les insère dans gold.distance_anomalies
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.business.detect_anomalies import detect_distance_anomalies
+      n = detect_distance_anomalies("{{ vars.db_path }}")
+      print(f"gold.distance_anomalies : {n} anomalie(s) détectée(s)")
+
+  # Test post-tâche : toutes les anomalies ont anomaly_reason non nul
+  - id: test_anomalies
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] gold.distance_anomalies : anomaly_reason toujours renseigné"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      no_reason = conn.execute(
+        "SELECT COUNT(*) FROM gold.distance_anomalies WHERE anomaly_reason IS NULL"
+      ).fetchone()[0]
+      count = conn.execute("SELECT COUNT(*) FROM gold.distance_anomalies").fetchone()[0]
+      conn.close()
+      assert no_reason == 0, f"[FAIL] distance_anomalies : {no_reason} sans anomaly_reason"
+      print(f"[PASS] gold.distance_anomalies : {count} anomalie(s), toutes avec raison — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 4 : Résumé des coûts par BU → gold.cost_summary
+  # ---------------------------------------------------------------------------
+  - id: build_summary
+    type: io.kestra.plugin.scripts.python.Script
+    description: Agrège les coûts prime + bien-être par BU dans gold.cost_summary
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.business.build_summary import build_cost_summary
+      n = build_cost_summary("{{ vars.db_path }}")
+      print(f"gold.cost_summary : {n} lignes (5 BU + TOTAL)")
+
+  # Test post-tâche : 6 lignes (5 BU + 1 TOTAL), total salariés = 161
+  - id: test_cost_summary
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] gold.cost_summary : 6 lignes, ligne TOTAL.nb_total_salaries = 161"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM gold.cost_summary").fetchone()[0]
+      total_sal = conn.execute(
+        "SELECT nb_total_salaries FROM gold.cost_summary WHERE bu = 'TOTAL'"
+      ).fetchone()[0]
+      conn.close()
+      assert count == 6, f"[FAIL] cost_summary : attendu 6 lignes, obtenu {count}"
+      assert total_sal == 161, f"[FAIL] cost_summary : TOTAL.nb_total_salaries = {total_sal}, attendu 161"
+      print(f"[PASS] gold.cost_summary : {count} lignes, TOTAL={total_sal} salariés — OK")
+
+  # ---------------------------------------------------------------------------
+  # Tâche 5 : Classement des activités → gold.activity_leaderboard
+  # ---------------------------------------------------------------------------
+  - id: build_leaderboard
+    type: io.kestra.plugin.scripts.python.Script
+    description: Classe les 161 salariés par nombre d'activités Strava dans gold.activity_leaderboard
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      from src.business.build_summary import build_activity_leaderboard
+      n = build_activity_leaderboard("{{ vars.db_path }}")
+      print(f"gold.activity_leaderboard : {n} salariés classés")
+
+  # Test post-tâche : 161 lignes, classement commence à 1
+  - id: test_leaderboard
+    type: io.kestra.plugin.scripts.python.Script
+    description: "[TEST] gold.activity_leaderboard : 161 lignes, MIN(classement) = 1"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    script: |
+      import sys
+      sys.path.insert(0, "{{ vars.project_root }}")
+      import duckdb
+      conn = duckdb.connect("{{ vars.db_path }}")
+      count = conn.execute("SELECT COUNT(*) FROM gold.activity_leaderboard").fetchone()[0]
+      min_rank = conn.execute("SELECT MIN(classement) FROM gold.activity_leaderboard").fetchone()[0]
+      conn.close()
+      assert count == 161, f"[FAIL] activity_leaderboard : attendu 161, obtenu {count}"
+      assert min_rank == 1, f"[FAIL] activity_leaderboard : MIN(classement) = {min_rank}, attendu 1"
+      print(f"[PASS] gold.activity_leaderboard : {count} salariés, classement min = {min_rank} — OK")
