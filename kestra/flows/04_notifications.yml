@@ -34,8 +34,6 @@ tasks:
     description: Envoie les messages Slack pour les activités des dernières N heures
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app

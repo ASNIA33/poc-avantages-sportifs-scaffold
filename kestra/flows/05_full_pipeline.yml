@@ -107,8 +107,6 @@ tasks:
     description: Affiche le résumé final du pipeline (KPI Gold)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app

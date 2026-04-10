@@ -25,8 +25,6 @@ tasks:
     description: Nettoie bronze.rh_raw → silver.employees (types, flag sportif, trim)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app
@@ -44,8 +42,6 @@ tasks:
     description: "[TEST] silver.employees : 161 lignes, pas de null id/nom/salaire"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app
@@ -76,8 +72,6 @@ tasks:
     description: Corrige bronze.sports_raw → silver.sports_activities (Runing→Running, flag has_sport)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app
@@ -95,8 +89,6 @@ tasks:
     description: "[TEST] silver.sports_activities : correction typo Runing, 95 sportifs"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app
@@ -128,8 +120,6 @@ tasks:
     description: Valide bronze.distances_raw → silver.distances (seuils 15km marche, 25km vélo)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app
@@ -147,8 +137,6 @@ tasks:
     description: "[TEST] silver.distances : 68 lignes, cohérence is_valid/anomaly_reason"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app
@@ -179,8 +167,6 @@ tasks:
     description: Normalise bronze.strava_raw → silver.strava_activities (distance_km, duree_minutes)
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app
@@ -198,8 +184,6 @@ tasks:
     description: "[TEST] silver.strava_activities : cohérence lignes et calculs distance/durée"
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
-    beforeCommands:
-      - pip install --quiet pandas openpyxl duckdb requests python-dotenv slack-sdk
     workingDir: /app
     env:
       PYTHONPATH: /app
