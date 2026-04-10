@@ -1,6 +1,13 @@
 # ============================================================
 # Docker Compose — POC Avantages Sportifs
 # Kestra (8082/8083) + Metabase (3000) + PostgreSQL (5433)
+#
+# Solution anti-deadlock macOS :
+#   - Kestra utilise une image custom (docker/Dockerfile.kestra)
+#     qui COPIE src/ et input/ au build → pas de bind mount
+#   - Le DuckDB est dans un volume Docker nommé kestra_data
+#     partagé entre Kestra et Metabase → pas de bind mount macOS
+#   - Pour récupérer le DuckDB sur le host : scripts/sync_data.sh
 # ============================================================
 
 services:
@@ -25,8 +32,12 @@ services:
       retries: 5
 
   # --- Kestra : orchestration + monitoring ---
+  # Image custom avec src/ et input/ copiés + dépendances Python installées
+  # → Élimine les bind mounts macOS qui causent OSError: [Errno 35]
   kestra-sports:
-    image: kestra/kestra:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.kestra
     container_name: kestra-sports
     restart: unless-stopped
     ports:
@@ -52,9 +63,8 @@ services:
     volumes:
       - kestra_sports_data:/app/storage
       - ./kestra/flows:/app/flows
-      - ./data:/app/data
-      - ./input:/app/input
-      - ./src:/app/src
+      # Volume nommé pour DuckDB (pas de bind mount → pas de deadlock macOS)
+      - kestra_data:/app/data
     depends_on:
       postgres-sports:
         condition: service_healthy
@@ -73,7 +83,8 @@ services:
       MB_PLUGINS_DIR: /plugins
     volumes:
       - metabase_sports_data:/metabase-data
-      - ./data:/data
+      # Même volume nommé que Kestra → accès partagé au DuckDB sans bind mount
+      - kestra_data:/data
     depends_on:
       - kestra-sports
     healthcheck:
@@ -97,7 +108,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data
+      - kestra_data:/app/data
       - ./input:/app/input
     depends_on:
       - kestra-sports
@@ -107,3 +118,6 @@ volumes:
   postgres_sports_data:
   kestra_sports_data:
   metabase_sports_data:
+  # Volume nommé partagé Kestra ↔ Metabase pour le fichier DuckDB
+  # Pas de bind mount macOS → évite OSError: [Errno 35] Resource deadlock
+  kestra_data:
