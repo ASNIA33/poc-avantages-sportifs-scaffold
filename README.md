@@ -19,34 +19,42 @@ Ce POC vise à tester la faisabilité technique, collecter les bonnes données e
 
 ## 🏗️ Architecture
 
-```
-┌─────────────┐    ┌─────────────┐    ┌──────────────────────────────────────┐
-│ Fichier RH  │───▶│             │    │          DuckDB                      │
-│ (.xlsx)     │    │  Ingestion  │───▶│  ┌──────────┐                       │
-├─────────────┤    │  Python     │    │  │  BRONZE  │ Données brutes        │
-│ Fichier     │───▶│  Scripts    │    │  │  (raw)   │                       │
-│ Sportif     │    │             │    │  └────┬─────┘                       │
-├─────────────┤    ├─────────────┤    │       ▼                             │
-│ API Google  │───▶│  API Calls  │───▶│  ┌──────────┐                       │
-│ Maps        │    │  Distances  │    │  │  SILVER  │ Nettoyé + testé       │
-├─────────────┤    │  Simulation │    │  │(cleaned) │ (SODA checks)         │
-│ Simulation  │───▶│             │    │  └────┬─────┘                       │
-│ Strava      │    └─────────────┘    │       ▼                             │
-│             │                       │  ┌──────────┐                       │
-│             │                       │  │   GOLD   │ KPI, éligibilité,     │
-│             │                       │  │(business)│ coûts, anomalies      │
-│             │                       │  └──────────┘                       │
-└─────────────┘                       └──────────────────────────────────────┘
-                                              │
-                    ┌─────────────────────────┼─────────────────────────┐
-                    ▼                         ▼                         ▼
-            ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-            │   Metabase   │         │    Slack     │         │   Alertes    │
-            │  Dashboard   │         │  Webhook     │         │  Anomalies   │
-            │  (port 3000) │         │  Notifs      │         │  distance    │
-            └──────────────┘         └──────────────┘         └──────────────┘
+```mermaid
+flowchart LR
+    subgraph Sources["📥 Sources"]
+        RH["Fichier RH\n(.xlsx)"]
+        Sports["Fichier Sportif\n(.xlsx)"]
+        GMaps["API Google Maps\n(distances)"]
+        Strava["Simulation Strava\n(activités 12 mois)"]
+    end
 
-                    Orchestré par Kestra (port 8082)
+    subgraph DuckDB["🦆 DuckDB — Architecture Médaillon"]
+        direction TB
+        Bronze["🟫 BRONZE\nDonnées brutes\nrh_raw · sports_raw\ndistances_raw · strava_raw"]
+        Silver["🥈 SILVER\nNettoyé + Typé + SODA\nemployees · sports_activities\ndistances · strava_activities"]
+        Gold["🥇 GOLD\nKPI Métier\nprime_eligibility · wellbeing_eligibility\ncost_summary · distance_anomalies"]
+        Bronze --> Silver --> Gold
+    end
+
+    subgraph Restitution["📤 Restitution"]
+        Metabase["Metabase\nDashboards\nport 3000"]
+        Slack["Slack\nNotifications"]
+        Alertes["Alertes\nAnomalies distance"]
+    end
+
+    Kestra(["⚙️ Kestra\nOrchestration\nport 8082"])
+
+    RH --> Bronze
+    Sports --> Bronze
+    GMaps --> Bronze
+    Strava --> Bronze
+    Gold --> Metabase
+    Gold --> Slack
+    Gold --> Alertes
+
+    Kestra -.->|orchestrate| Sources
+    Kestra -.->|orchestrate| DuckDB
+    Kestra -.->|orchestrate| Restitution
 ```
 
 ---

@@ -13,23 +13,116 @@ Ce document détaille les choix d'architecture pour le POC Avantages Sportifs de
 
 ## Flux de données
 
+### Pipeline global — Sources → Bronze → Silver → Gold → Restitution
+
+```mermaid
+flowchart TD
+    subgraph Sources["📥 Sources de données"]
+        RH["Donnees_RH.xlsx\n161 salariés"]
+        SP["Donnees_Sportive.xlsx\n161 lignes sport"]
+        GM["API Google Maps\nDistances domicile-bureau"]
+        ST["Simulation Strava\nActivités 12 mois"]
+    end
+
+    subgraph Ingestion["⚙️ Ingestion Python — src/ingestion/"]
+        LE["load_excel.py\nload_rh_to_bronze()\nload_sports_to_bronze()"]
+        FD["fetch_distances.py\nfetch_distances()"]
+        GS["generate_strava.py\ngenerate_strava_data()"]
+    end
+
+    subgraph Bronze["🟫 BRONZE — schéma bronze (DuckDB)"]
+        BR["bronze.rh_raw"]
+        BS["bronze.sports_raw"]
+        BD["bronze.distances_raw"]
+        BT["bronze.strava_raw"]
+    end
+
+    subgraph Silver["🥈 SILVER — schéma silver (DuckDB)"]
+        SE["silver.employees"]
+        SSA["silver.sports_activities"]
+        SD["silver.distances"]
+        STA["silver.strava_activities"]
+    end
+
+    subgraph Gold["🥇 GOLD — schéma gold (DuckDB)"]
+        GP["gold.prime_eligibility\nÉligibilité prime 5%"]
+        GW["gold.wellbeing_eligibility\nÉligibilité jours bien-être"]
+        GC["gold.cost_summary\nCoûts par BU"]
+        GA["gold.distance_anomalies\nDéclarations incohérentes"]
+        GL["gold.activity_leaderboard\nClassement activités"]
+    end
+
+    subgraph Restitution["📤 Restitution"]
+        MB["Metabase\nDashboards KPI\nport 3000"]
+        SL["Slack\nNotifications"]
+        AL["Alertes\nAnomalies distance"]
+    end
+
+    RH --> LE --> BR
+    SP --> LE --> BS
+    GM --> FD --> BD
+    ST --> GS --> BT
+
+    BR & BS --> SE
+    BS --> SSA
+    BD --> SD
+    BT --> STA
+
+    SE & SSA & SD --> GP
+    SE & STA --> GW
+    GP & GW --> GC
+    SD --> GA
+    STA --> GL
+
+    GP & GW & GC & GA & GL --> MB
+    GP & GW --> SL
+    GA --> AL
 ```
-Sources (Excel, API, Simulation)
-    │
-    ▼
-[Ingestion Python] ──▶ BRONZE (DuckDB, schéma bronze)
-    │                      Données brutes, horodatées
-    ▼
-[Transformation Python + SODA] ──▶ SILVER (DuckDB, schéma silver)
-    │                                  Données nettoyées, typées, validées
-    ▼
-[Business Python] ──▶ GOLD (DuckDB, schéma gold)
-    │                    KPI, éligibilités, coûts, anomalies
-    ▼
-[Restitution]
-    ├──▶ Metabase (dashboards)
-    ├──▶ Slack (notifications)
-    └──▶ Alertes (anomalies)
+
+### Flux de tests — SODA + pytest + Kestra
+
+```mermaid
+flowchart LR
+    subgraph Kestra["⚙️ Tests Kestra (par tâche)"]
+        K1["Vérif. bronze.rh_raw\n= 161 lignes"]
+        K2["Vérif. bronze.sports_raw\n= 161 lignes"]
+        K3["Vérif. silver.employees\nno null, unicité"]
+        K4["Vérif. gold.prime_eligibility\n> 0 éligibles"]
+    end
+
+    subgraph SODA["🔍 Tests SODA (couche Silver)"]
+        S1["Distances ≥ 0"]
+        S2["Dates valides\net logiques"]
+        S3["Unicité id_salarie"]
+        S4["Salaires 25k–80k €"]
+        S5["Pas de nulls\nchamps critiques"]
+    end
+
+    subgraph Pytest["🧪 Tests pytest (src/tests/)"]
+        subgraph Ing["test_ingestion.py"]
+            P1["RH : 161 lignes\nsnake_case · no null id\n_ingested_at présent"]
+            P2["Sports : 161 lignes\nno null id_salarie"]
+            P3["Strava : >1000 lignes\ncolonnes · dates · distances\nno null · uniquement sportifs"]
+        end
+        subgraph Trans["test_transformation.py"]
+            P4["Nettoyage Running\nRuning → Running"]
+            P5["Distances validées\nmax 15km marche"]
+        end
+        subgraph Bus["test_business.py"]
+            P6["Prime = salaire × 0.05"]
+            P7["Seuil 14/15/16 activités"]
+        end
+        subgraph Notif["test_notifications.py"]
+            P8["Format message Slack"]
+        end
+    end
+
+    Bronze["🟫 BRONZE"] -->|after ingestion| Kestra
+    Silver["🥈 SILVER"] -->|after transformation| SODA
+    Bronze -->|unit tests| Pytest
+    Silver -->|unit tests| Pytest
+    Gold["🥇 GOLD"] -->|unit tests| Pytest
+    Gold -->|after business| Kestra
 ```
 
 ## Choix techniques détaillés
@@ -114,6 +207,32 @@ Deux fonctions principales, toutes deux basées sur `db_session` (gestionnaire d
 | `test_load_sports_no_null_id` | `bronze.sports_raw` | Aucun `id_salarie` null |
 
 Chaque test utilise une DB temporaire (`/tmp/test_ingestion.duckdb`) nettoyée avant et après exécution.
+
+## Docker Compose — Services, ports et volumes
+
+```mermaid
+graph TD
+    subgraph Compose["docker-compose.yml"]
+        subgraph Services["Services"]
+            PG["postgres\nImage: postgres:18\nPort: 5433→5432\nRôle: backend Kestra"]
+            KE["kestra\nImage: kestra/kestra:latest\nPort: 8082→8080\nPort: 8083→8081\nDépend de: postgres"]
+            MB["metabase\nImage: metabase/metabase:latest\nPort: 3000→3000\nDépend de: kestra"]
+        end
+
+        subgraph Volumes["Volumes partagés"]
+            VDB["duckdb-data\nfichier sports_poc.duckdb\npartagé Kestra ↔ Metabase"]
+            VPG["postgres-data\ndonnées PostgreSQL Kestra"]
+            VKE["kestra-data\nflows + plugins Kestra"]
+        end
+    end
+
+    PG -- "données persistantes" --> VPG
+    KE -- "données persistantes" --> VKE
+    KE -- "accès DuckDB" --> VDB
+    MB -- "accès DuckDB" --> VDB
+    PG -.->|"backend metadata"| KE
+    KE -.->|"source DuckDB"| MB
+```
 
 ## Sécurité
 
