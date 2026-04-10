@@ -724,4 +724,12 @@ main (prod) ◄──── merge uniquement par le développeur
 
 ---
 
-*Projet réalisé par l'équipe Sport Data Solution — Juliette (cofondatrice), Alexandre (cofondateur), Data Engineer (responsable POC).*
+---
+
+👤 Auteur
+
+**Abd Selam M'BODJ** — Data Engineer
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Abd_Selam_M'BODJ-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mbodj)
+
+*Responsable du POC Avantages Sportifs*

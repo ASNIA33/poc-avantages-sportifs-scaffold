@@ -744,3 +744,11 @@ run_parser.add_argument("--threshold", type=int, default=None)
 - **PostgreSQL Kestra** accessible uniquement en interne Docker (réseau `default`)
 
 [↑ Retour au sommaire](#table-des-matières)
+
+👤 Auteur
+
+**Abd Selam M'BODJ** — Data Engineer
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Abd_Selam_M'BODJ-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mbodj)
+
+*Responsable du POC Avantages Sportifs*
