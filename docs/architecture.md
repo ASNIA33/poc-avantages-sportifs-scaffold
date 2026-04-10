@@ -197,8 +197,10 @@ Deux fonctions principales, toutes deux basées sur `db_session` (gestionnaire d
 
 ### Tests implémentés — Ingestion Bronze (`src/tests/test_ingestion.py`)
 
+**RH & Sportif (Excel → Bronze)**
+
 | Test | Table | Vérification |
-|------|-------|--------------|
+|---|---|---|
 | `test_load_rh_row_count` | `bronze.rh_raw` | Exactement 161 lignes |
 | `test_load_rh_columns_snake_case` | `bronze.rh_raw` | Colonnes `[a-z0-9_]+` uniquement |
 | `test_load_rh_no_null_id` | `bronze.rh_raw` | Aucun `id_salarie` null |
@@ -206,7 +208,32 @@ Deux fonctions principales, toutes deux basées sur `db_session` (gestionnaire d
 | `test_load_sports_row_count` | `bronze.sports_raw` | Exactement 161 lignes |
 | `test_load_sports_no_null_id` | `bronze.sports_raw` | Aucun `id_salarie` null |
 
+**Simulation Strava (génération → Bronze)**
+
+| Test | Table | Vérification |
+|---|---|---|
+| `test_strava_generation_row_count` | `bronze.strava_raw` | > 1 000 lignes |
+| `test_strava_columns` | `bronze.strava_raw` | 7 colonnes exactes |
+| `test_strava_no_null_required` | `bronze.strava_raw` | `id_salarie`, `date_debut`, `sport_type` non nuls |
+| `test_strava_distance_positive` | `bronze.strava_raw` | `distance_m` > 0 quand non nulle |
+| `test_strava_duration_positive` | `bronze.strava_raw` | `temps_ecoule_s` > 0 |
+| `test_strava_date_range` | `bronze.strava_raw` | Toutes les dates dans les 12 derniers mois |
+| `test_strava_only_sportifs` | `bronze.strava_raw` | Uniquement des salariés avec sport déclaré |
+
+**Distances domicile-bureau (haversine/API → Bronze)**
+
+| Test | Table | Vérification |
+|---|---|---|
+| `test_distances_row_count` | `bronze.distances_raw` | Exactement 68 lignes (sportifs) |
+| `test_distances_columns` | `bronze.distances_raw` | 5 colonnes exactes |
+| `test_distances_positive` | `bronze.distances_raw` | Toutes distances > 0 km |
+| `test_distances_mode_coherent` | `bronze.distances_raw` | Marche → walking, Vélo → bicycling |
+| `test_distances_no_null` | `bronze.distances_raw` | `id_salarie` et `distance_km` non nuls |
+| `test_haversine_lattes` | _(unitaire)_ | Lattes → distance < 5 km |
+| `test_haversine_nimes` | _(unitaire)_ | Nîmes → distance > 30 km |
+
 Chaque test utilise une DB temporaire (`/tmp/test_ingestion.duckdb`) nettoyée avant et après exécution.
+Le mode simulation haversine est utilisé en test (pas d'appel API réelle).
 
 ## Docker Compose — Services, ports et volumes
 

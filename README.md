@@ -106,14 +106,28 @@ docker-compose ps
 | Kestra UI | http://localhost:8082 | Orchestration & monitoring |
 | Metabase | http://localhost:3000 | Dashboards KPI |
 
+### Configuration
+
+Copier `.env.example` en `.env` et renseigner les variables :
+
+```bash
+cp .env.example .env
+# Éditer .env : optionnellement ajouter GOOGLE_MAPS_API_KEY
+```
+
+Sans clé API, le pipeline utilise automatiquement le mode simulation haversine.
+
 ### Lancer les scripts manuellement
 
 ```bash
 # Ingestion Excel → Bronze (RH + Sportif)
 python -m src.ingestion.load_excel
 
-# Lancer les tests d'ingestion
-python -m pytest src/tests/test_ingestion.py -v
+# Calcul distances domicile-bureau → Bronze (mode simulation sans clé)
+python -m src.ingestion.fetch_distances
+
+# Génération données Strava simulées → Bronze
+python -m src.ingestion.generate_strava
 
 # Lancer tous les tests
 python -m pytest src/tests/ -v
