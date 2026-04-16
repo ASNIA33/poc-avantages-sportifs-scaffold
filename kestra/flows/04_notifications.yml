@@ -16,6 +16,15 @@ description: |
   sportives récentes des salariés. En mode dry-run si SLACK_WEBHOOK_URL n'est
   pas configuré (adapté au POC).
 
+# Inputs déclarés — reçus depuis le flow 05-full-pipeline (Subflow)
+inputs:
+  - id: db_path
+    type: STRING
+    defaults: "/app/data/sports_poc.duckdb"
+  - id: hours
+    type: STRING
+    defaults: "24"
+
 variables:
   db_path: "/app/data/sports_poc.duckdb"
   project_root: "/app"
@@ -34,6 +43,10 @@ tasks:
     description: Envoie les messages Slack pour les activités des dernières N heures
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
+    workingDir: /app
+    env:
+      PYTHONPATH: /app
+      DUCKDB_PATH: /app/data/sports_poc.duckdb
     script: |
       import sys
       sys.path.insert(0, "{{ vars.project_root }}")
@@ -44,7 +57,7 @@ tasks:
         hours=int("{{ vars.hours }}"),
         webhook_url=webhook,
       )
-      print(f"Notifications : {count} message(s) traité(s) sur les dernières {{ vars.hours }}h")
+      print("Notifications : " + str(count) + " message(s) traité(s) sur les dernières {{ vars.hours }}h")
 
   # ---------------------------------------------------------------------------
   # Tâche 2 (optionnelle) : Notifier une activité spécifique par ID (démo live)

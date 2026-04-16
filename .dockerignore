@@ -1,0 +1,50 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environnement
+.env
+.env.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Data (trop volumineux pour Docker build)
+data/*.duckdb
+data/*.duckdb.wal
+
+# Docker
+docker/metabase/metabase.db/
+docker/postgres-data/
+
+# Notes
+b-notes
+
+# Tests
+.soda/
+
+# Docs non nécessaires au runtime
+docs/*.png
+docs/*.jpg

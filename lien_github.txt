@@ -1,0 +1,80 @@
+═══════════════════════════════════════════════════════════════════
+POC AVANTAGES SPORTIFS — SPORT DATA SOLUTION
+ Lien GitHub du projet
+═══════════════════════════════════════════════════════════════════
+
+Auteur : Abd Selam M'BODJ
+Fonction : Data Engineer
+LinkedIn : https://linkedin.com/in/mbodj
+Date : 16 avril 2026
+
+
+DÉPÔT GITHUB
+────────────────────────────────────────────────────────────────────
+
+URL publique du projet :
+
+    https://github.com/ASNIA33/poc-avantages-sportifs-scaffold
+
+
+CONTENU DU DÉPÔT
+────────────────────────────────────────────────────────────────────
+
+Le dépôt contient l'intégralité du code source du POC, organisé
+comme suit :
+
+• src/                 Code Python (ingestion, transformation, business)
+  ├── ingestion/       Chargement Excel, API Google Maps, Strava
+  ├── transformation/  Nettoyage et validation (couche Silver)
+  ├── business/        Calculs prime, bien-être, anomalies (couche Gold)
+  ├── notifications/   Intégration Slack
+  └── tests/           Tests pytest (65+ tests unitaires)
+
+• kestra/flows/        5 flows YAML d'orchestration
+  ├── 01_ingestion.yml
+  ├── 02_transformation.yml
+  ├── 03_business.yml
+  ├── 04_notifications.yml
+  └── 05_full_pipeline.yml
+
+• docker/              Dockerfiles personnalisés Kestra + Metabase
+
+• docker-compose.yml   Orchestration 3 services (Kestra, Metabase, PostgreSQL)
+
+• input/               Données source (Excel RH + Sportif)
+
+• docs/                Documentation architecture + diagrammes
+
+• main.py              CLI d'exécution (run, notify, status)
+
+• README.md            Guide de démarrage rapide
+
+• .env.example         Template des variables d'environnement
+
+
+BRANCHES
+────────────────────────────────────────────────────────────────────
+
+• main                 Version de production, stable
+• develop              Branche de développement (intégration continue)
+
+
+COMMANDES RAPIDES
+────────────────────────────────────────────────────────────────────
+
+Cloner le projet :
+    git clone https://github.com/ASNIA33/poc-avantages-sportifs-scaffold.git
+
+Démarrer l'environnement Docker :
+    cd poc-avantages-sportifs-scaffold
+    docker-compose up -d
+
+Accéder aux interfaces :
+    • Kestra     : http://localhost:8082
+    • Metabase   : http://localhost:3000
+
+Exécuter le pipeline en ligne de commande :
+    python main.py run --prime-rate 0.05 --wellbeing-threshold 15
+
+
+═══════════════════════════════════════════════════════════════════

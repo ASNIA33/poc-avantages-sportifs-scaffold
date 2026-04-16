@@ -46,8 +46,3 @@ htmlcov/
 
 # SODA
 .soda/
-
-# Claude Code (dev only)
-.clinerules
-CLAUDE.md
-.claude/
