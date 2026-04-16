@@ -46,3 +46,22 @@ htmlcov/
 
 # SODA
 .soda/
+
+# Kestra
+kestra/storage/
+kestra/logs/
+
+# PostgreSQL Docker volumes
+docker/postgres-data/
+postgres-data/
+
+# Notes personnelles
+b-notes
+
+# Claude Code
+.claude-cache/
+
+# Claude Code (config privée)
+CLAUDE.md
+.claude/
+.clinerules
